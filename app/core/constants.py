@@ -66,6 +66,14 @@ PROGRAM_LEVELS: list[tuple[str, str]] = [
     ("Global", "Global Headquarters (Level 1)"),
 ]
 
+FELLOWSHIP_GROUPS: list[tuple[str, str]] = [
+    ("adult", "Adult Fellowship"),
+    ("young_adult", "Young Adult Fellowship"),
+    ("campus", "Campus Fellowship"),
+    ("youth", "Youth Fellowship"),
+    ("children", "Children Fellowship"),
+]
+
 # 5. Headcount Demographic Categories
 COUNT_CATEGORIES: list[dict[str, str]] = [
     {"key": "adult_male", "label": "Adult Male", "icon": "person-standing", "tone": "primary"},

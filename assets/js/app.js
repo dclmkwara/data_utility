@@ -37,11 +37,20 @@ const DCLM_APP = (function () {
     return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
   }
 
+  function eventContextKey(setup = activeSetup) {
+    if (!setup) return "";
+    return setup.event_id || `routine:${setup.location_id}:${setup.service_date}`;
+  }
+
+  function requiresScheduledEvent(setup = activeSetup) {
+    return String(setup?.program_domain || "").toLowerCase() === "crusade";
+  }
+
   async function persistCountDraft() {
-    if (!activeSetup?.event_id || !activeSetup?.location_id) return;
+    if (!activeSetup?.location_id) return;
     await DCLM_DB.saveCountDraft({
       counts: { ...counterState },
-      event_id: activeSetup.event_id,
+      event_id: activeSetup.event_id || null,
       location_id: activeSetup.location_id,
       setup: { ...activeSetup },
       updated_at: new Date().toISOString(),
@@ -63,7 +72,7 @@ const DCLM_APP = (function () {
   }
 
   function escapeHTML(value) {
-    return String(value ?? "").replace(/[&<>"']/g, (char) => ({
+    return String(value ?? "").replace(/Church_server/gi, "church records service").replace(/[&<>"']/g, (char) => ({
       "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
     })[char]);
   }
@@ -73,12 +82,24 @@ const DCLM_APP = (function () {
     if (!container) return;
 
     container.className = `dclm-toast dclm-toast--${type} is-visible`;
-    container.textContent = message;
+    container.textContent = String(message || "").replace(/Church_server/gi, "church records service");
 
     clearTimeout(container._timer);
     container._timer = setTimeout(() => {
       container.classList.remove("is-visible");
     }, 3200);
+  }
+
+  async function refreshHomeQueueSummary() {
+    const countEl = qs("#home-queue-count");
+    const captionEl = qs("#home-queue-caption");
+    if (!countEl && !captionEl) return;
+    const pending = await DCLM_DB.getPendingCounts();
+    const total = Number(pending.total || 0);
+    if (countEl) countEl.textContent = `${total} pending`;
+    if (captionEl) captionEl.textContent = total
+      ? "Review and sync records saved on this device."
+      : "No records are waiting to sync.";
   }
 
   function updateNetworkStatus() {
@@ -90,6 +111,10 @@ const DCLM_APP = (function () {
       pill.className = `dclm-status-pill ${isOnline ? "is-online" : "is-offline"}`;
       text.textContent = isOnline ? "Online" : "Offline";
     }
+    const settingsStatus = qs("#settings-connection-status");
+    if (settingsStatus) settingsStatus.textContent = isOnline
+      ? "Connection: online"
+      : "Connection: offline · saved records remain on this device";
   }
 
   // -------------------------------------------------------------
@@ -113,7 +138,7 @@ const DCLM_APP = (function () {
       if (btnEl) btnEl.textContent = "Program setup";
       if (shieldEl) shieldEl.classList.add("d-none");
       qsa("[id$='-content-wrap']").forEach((el) => el.classList.remove("d-none"));
-    } else if (activeSetup && activeSetup.location_id && activeSetup.event_id) {
+    } else if (activeSetup && activeSetup.location_id && activeSetup.service_date && activeSetup.program_type) {
       if (barEl) {
         barEl.className = "dclm-identity-bar is-active";
       }
@@ -222,7 +247,7 @@ const DCLM_APP = (function () {
         && activeSetup?.event_id;
       const label = sameVerifiedContext
         ? `${activeSetup.program_type} Â· ${activeSetup.service_date} Â· Previously verified (offline)`
-        : "Connect to load available Church_server events";
+        : "Connect to load available scheduled events";
       select.replaceChildren(new Option(label, sameVerifiedContext ? activeSetup.event_id : ""));
       select.disabled = true;
       return;
@@ -235,7 +260,7 @@ const DCLM_APP = (function () {
       const data = await response.json();
       if (!response.ok || !data.ok) throw new Error(data.error || "Could not load events.");
       const previous = select.value || (activeSetup?.location_id === locationId && activeSetup?.service_date === serviceDate ? activeSetup.event_id : "");
-      const options = [new Option(data.items.length ? "Choose the service event" : "No matching events found", "")];
+      const options = [new Option(data.items.length ? "No scheduled event selected" : "No matching event (routine services may continue without one)", "")];
       for (const event of data.items) {
         const option = new Option([event.title || event.program_type?.name || programType, event.date, event.event_mode].filter(Boolean).join(" · "), event.id);
         option.dataset.locationId = event.location_id || locationId;
@@ -243,8 +268,7 @@ const DCLM_APP = (function () {
       }
       select.replaceChildren(...options);
       if (previous && data.items.some((event) => String(event.id) === String(previous))) select.value = previous;
-      select.disabled = data.items.length === 0;
-      if (!data.items.length) showToast("No event matches this location, date, and program in Church_server.", "warning");
+      select.disabled = false;
     } catch (error) {
       select.replaceChildren(new Option("Events unavailable; reconnect to load", ""));
       select.disabled = true;
@@ -332,8 +356,11 @@ const DCLM_APP = (function () {
       return false;
     }
 
-    if (!identity.church_type || !identity.program_domain || !identity.program_type || !identity.program_level || !identity.location_id || !identity.event_id) {
-      showToast("Complete setup and select a verified Church_server event.", "warning");
+    if (!identity.church_type || !identity.program_domain || !identity.program_type || !identity.program_level || !identity.location_id || !identity.service_date
+        || (requiresScheduledEvent(identity) && !identity.event_id)) {
+      showToast(requiresScheduledEvent(identity)
+        ? "Crusade setup requires its scheduled event."
+        : "Complete the church section, program, location, and service date.", "warning");
       haptic("warning");
       return false;
     }
@@ -460,14 +487,14 @@ const DCLM_APP = (function () {
   async function initCounterBindings() {
     const draft = await DCLM_DB.getCountDraft();
     if (draft && Object.values(draft.counts || {}).some((value) => Number(value) > 0)) {
-      if (draft.setup?.event_id && (activeSetup?.event_id !== draft.event_id || activeSetup?.location_id !== draft.location_id)) {
+      if (draft.setup && (eventContextKey(activeSetup) !== eventContextKey(draft.setup) || activeSetup?.location_id !== draft.location_id)) {
         activeSetup = draft.setup;
         await DCLM_DB.saveActiveSetup(draft.setup);
         await refreshActiveSetup();
         showToast("Restored the unfinished tally and its original event from this device.", "info");
       }
       counterState = { ...counterState, ...draft.counts };
-      if (draft.setup?.event_id === activeSetup?.event_id && draft.location_id === activeSetup?.location_id) {
+      if (draft.setup && eventContextKey(draft.setup) === eventContextKey(activeSetup) && draft.location_id === activeSetup?.location_id) {
         showToast("Restored the unfinished tally from this device.", "info");
       }
     }
@@ -475,8 +502,11 @@ const DCLM_APP = (function () {
       tile.addEventListener("click", async (e) => {
         e.preventDefault();
         e.stopPropagation();
-        if (!activeSetup || !activeSetup.location_id || !activeSetup.event_id) {
-          showToast("Select a verified program event in setup before taking counts.", "warning");
+        if (!activeSetup || !activeSetup.location_id || !activeSetup.service_date || !activeSetup.program_type
+            || (requiresScheduledEvent() && !activeSetup.event_id)) {
+          showToast(requiresScheduledEvent()
+            ? "Select the scheduled crusade event before taking counts."
+            : "Complete service setup before taking counts.", "warning");
           haptic("warning");
           return;
         }
@@ -550,8 +580,11 @@ const DCLM_APP = (function () {
     const offeringSubmitBtn = qs("#btn-submit-offering");
     if (offeringSubmitBtn) {
       offeringSubmitBtn.addEventListener("click", async () => {
-        if (!activeSetup || !activeSetup.location_id || !activeSetup.event_id) {
-          showToast("Select a verified program event in setup before recording offerings.", "warning");
+        if (!activeSetup || !activeSetup.location_id || !activeSetup.service_date || !activeSetup.program_type
+            || (requiresScheduledEvent() && !activeSetup.event_id)) {
+          showToast(requiresScheduledEvent()
+            ? "Select the scheduled crusade event before recording offerings."
+            : "Complete service setup before recording offerings.", "warning");
           haptic("warning");
           return;
         }
@@ -572,17 +605,19 @@ const DCLM_APP = (function () {
         const item = {
           client_id: generateUUID(),
           location_id: activeSetup.location_id,
-          event_id: activeSetup.event_id,
+          event_id: activeSetup.event_id || null,
           amount: amount,
           fund_type: fundType,
           payment_method: paymentMethod,
           recorded_at: new Date().toISOString(),
           church_type: activeSetup.church_type,
+          program_domain: activeSetup.program_domain,
           program_type: activeSetup.program_type,
           service_date: activeSetup.service_date,
         };
 
         await DCLM_DB.addToQueue("offerings_queue", item);
+        await refreshHomeQueueSummary();
         showToast(`Entry of â‚¦${amountValue.toLocaleString()} queued offline.`, "success");
         haptic("success");
         if (amountInput) amountInput.value = "";
@@ -595,8 +630,11 @@ const DCLM_APP = (function () {
       finalizeCountBtn.addEventListener("click", async (e) => {
         e.preventDefault();
         e.stopPropagation();
-        if (!activeSetup || !activeSetup.location_id || !activeSetup.event_id) {
-          showToast("Select a verified program event in setup before saving counts.", "warning");
+        if (!activeSetup || !activeSetup.location_id || !activeSetup.service_date || !activeSetup.program_type
+            || (requiresScheduledEvent() && !activeSetup.event_id)) {
+          showToast(requiresScheduledEvent()
+            ? "Select the scheduled crusade event before saving counts."
+            : "Complete service setup before saving counts.", "warning");
           haptic("warning");
           return;
         }
@@ -616,7 +654,7 @@ const DCLM_APP = (function () {
         const batch = {
           client_id: generateUUID(),
           location_id: activeSetup.location_id,
-          event_id: activeSetup.event_id,
+          event_id: activeSetup.event_id || null,
           assignment_id: activeSetup.count_assignment_id || null,
           adult_male: counterState.adult_male,
           adult_female: counterState.adult_female,
@@ -627,11 +665,13 @@ const DCLM_APP = (function () {
           total: total,
           captured_at: new Date().toISOString(),
           church_type: activeSetup.church_type,
+          program_domain: activeSetup.program_domain,
           program_type: activeSetup.program_type,
           service_date: activeSetup.service_date,
         };
 
         await DCLM_DB.addToQueue("counts_queue", batch);
+        await refreshHomeQueueSummary();
         await DCLM_DB.clearCountDraft();
         showToast(`Batch of ${total.toLocaleString()} souls queued for sync!`, "success");
         haptic("success");
@@ -649,8 +689,8 @@ const DCLM_APP = (function () {
   async function fetchLocationRoster(locationId) {
     if (!locationId) return;
 
-    const cached = await DCLM_DB.getWorkerRoster(locationId, activeSetup?.event_id || "");
-    const submittedWorkers = await DCLM_DB.getAttendanceSubmittedWorkerIds(activeSetup?.event_id || "");
+    const cached = await DCLM_DB.getWorkerRoster(locationId, eventContextKey());
+    const submittedWorkers = await DCLM_DB.getAttendanceSubmittedWorkerIds(eventContextKey());
     cachedRoster = cached.map((worker) => ({ ...worker, attendance_submitted: submittedWorkers.has(String(worker.worker_id)) }));
     rosterState = cached.length ? "stale" : "loading";
     renderWorkerRoster();
@@ -681,12 +721,12 @@ const DCLM_APP = (function () {
         rosterState = cachedRoster.length ? "fresh" : "empty";
         showToast(cachedRoster.length
           ? `Roster refreshed: ${cachedRoster.length} workers for ${locationId}.`
-          : "Church_server returned an empty approved worker roster for this location.", cachedRoster.length ? "success" : "info");
+          : "No approved workers were returned for this location.", cachedRoster.length ? "success" : "info");
         renderWorkerRoster();
       }
     } catch (err) {
       console.warn("Could not fetch remote roster:", err);
-      cachedRoster = (await DCLM_DB.getWorkerRoster(locationId, activeSetup?.event_id || ""))
+      cachedRoster = (await DCLM_DB.getWorkerRoster(locationId, eventContextKey()))
         .map((worker) => ({ ...worker, attendance_submitted: submittedWorkers.has(String(worker.worker_id)) }));
       rosterState = cachedRoster.length ? "stale" : "error";
       const lastUpdated = cachedRoster[0]?.cached_at;
@@ -726,7 +766,7 @@ const DCLM_APP = (function () {
             : rosterState === "error"
               ? "Roster unavailable. Check your connection and access, then refresh."
               : rosterState === "empty"
-                ? "Church_server returned no approved workers for this location. Contact your administrator if this is unexpected."
+                ? "No approved workers were returned for this location. Contact your administrator if this is unexpected."
                 : activeSetup?.location_id
                   ? "No workers are available in the approved roster for this location. Refresh or contact your administrator."
                   : "Configure your location setup to load workers for this service.";
@@ -756,7 +796,7 @@ const DCLM_APP = (function () {
       card.querySelector(".dclm-check-btn").addEventListener("click", async () => {
         const nextState = !worker.marked_present;
         worker.marked_present = nextState;
-        await DCLM_DB.updateWorkerCheck(worker.worker_id, nextState, activeSetup?.event_id);
+        await DCLM_DB.updateWorkerCheck(worker.worker_id, nextState, eventContextKey());
         renderWorkerRoster();
         haptic("tick");
         showToast(nextState ? `${worker.name} marked Present` : `${worker.name} unmarked`, nextState ? "success" : "info");
@@ -774,7 +814,7 @@ const DCLM_APP = (function () {
 
     if (!presentListEl) return;
 
-    DCLM_DB.getWorkerRoster(activeSetup?.location_id || "", activeSetup?.event_id || "").then((roster) => {
+    DCLM_DB.getWorkerRoster(activeSetup?.location_id || "", eventContextKey()).then((roster) => {
       const marked = roster.filter((w) => w.marked_present);
       if (presentCountEl) presentCountEl.textContent = `${marked.length} Workers`;
       if (rosterCountEl) rosterCountEl.textContent = `${roster.length} Total Registered`;
@@ -811,11 +851,15 @@ const DCLM_APP = (function () {
     const approveBtn = qs("#btn-approve-attendance-batch");
     if (approveBtn) {
       approveBtn.addEventListener("click", async () => {
-        if (!activeSetup?.event_id || !activeSetup?.location_id) {
-          showToast("Select a verified program event before reviewing attendance.", "warning");
+        if (!activeSetup?.location_id || !activeSetup?.service_date || !activeSetup?.program_type
+            || (requiresScheduledEvent() && !activeSetup.event_id)) {
+          showToast(requiresScheduledEvent()
+            ? "Select the scheduled crusade event before reviewing attendance."
+            : "Complete service setup before reviewing attendance.", "warning");
           return;
         }
-        const roster = await DCLM_DB.getWorkerRoster(activeSetup.location_id, activeSetup.event_id);
+        const contextKey = eventContextKey();
+        const roster = await DCLM_DB.getWorkerRoster(activeSetup.location_id, contextKey);
         const marked = roster.filter((w) => w.marked_present);
 
         if (marked.length === 0) {
@@ -824,14 +868,19 @@ const DCLM_APP = (function () {
           return;
         }
 
-        const submittedWorkers = await DCLM_DB.getAttendanceSubmittedWorkerIds(activeSetup.event_id);
+        const submittedWorkers = await DCLM_DB.getAttendanceSubmittedWorkerIds(contextKey);
         let queuedCount = 0;
         for (const worker of marked) {
           if (submittedWorkers.has(String(worker.worker_id))) continue;
           const item = {
             client_id: generateUUID(),
             location_id: activeSetup?.location_id || worker.location_id,
-            event_id: activeSetup?.event_id,
+            event_id: activeSetup?.event_id || null,
+            context_key: contextKey,
+            church_type: activeSetup.church_type,
+            program_domain: activeSetup.program_domain,
+            program_type: activeSetup.program_type,
+            service_date: activeSetup.service_date,
             worker_id: worker.worker_id,
             status: "present",
             recorded_at: new Date().toISOString(),
@@ -844,6 +893,7 @@ const DCLM_APP = (function () {
           showToast("These workers already have attendance records queued or confirmed for this event.", "info");
           return;
         }
+        await refreshHomeQueueSummary();
         showToast(`Attendance for ${queuedCount} worker(s) queued for this event.`, "success");
         haptic("success");
 
@@ -867,7 +917,7 @@ const DCLM_APP = (function () {
 
     if (activeScreen === "fellowship") {
       // Fellowship reports use their own authorized fellowship ID and date.
-    } else if (activeSetup && activeSetup.location_id && activeSetup.event_id) {
+    } else if (activeSetup && activeSetup.location_id) {
       fetchLocationRoster(activeSetup.location_id);
     }
   }
@@ -897,8 +947,11 @@ const DCLM_APP = (function () {
     const regSubmitBtn = qs("#btn-submit-registration");
     if (regSubmitBtn) {
       regSubmitBtn.addEventListener("click", async () => {
-        if (!activeSetup || !activeSetup.location_id || !activeSetup.event_id) {
-          showToast("Select a verified program event in setup before registering members.", "warning");
+        if (!activeSetup || !activeSetup.location_id || !activeSetup.service_date || !activeSetup.program_type
+            || (requiresScheduledEvent() && !activeSetup.event_id)) {
+          showToast(requiresScheduledEvent()
+            ? "Select the scheduled crusade event before registering members."
+            : "Complete service setup before registering members.", "warning");
           haptic("warning");
           return;
         }
@@ -940,7 +993,7 @@ const DCLM_APP = (function () {
         const record = {
           client_id: generateUUID(),
           location_id: activeSetup.location_id,
-          event_id: activeSetup.event_id,
+          event_id: activeSetup.event_id || null,
           record_type: recordTypeInput?.value || "convert",
           assignment_id: recordTypeInput?.value === "convert" ? activeSetup.convert_assignment_id || null : null,
           name: name,
@@ -957,6 +1010,7 @@ const DCLM_APP = (function () {
             salvation_type: qs("#reg_salvation_type")?.value || "",
           },
           church_type: activeSetup.church_type,
+          program_domain: activeSetup.program_domain,
           program_type: activeSetup.program_type,
           service_date: activeSetup.service_date,
           captured_at: new Date().toISOString(),
@@ -965,7 +1019,8 @@ const DCLM_APP = (function () {
         regSubmitBtn.disabled = true;
         try {
           await DCLM_DB.addToQueue("registration_queue", record);
-          showToast(`Saved ${name} on this device. It has not been accepted by Church_server yet.`, "success");
+          showToast(`Saved ${name} on this device. It is waiting to sync.`, "success");
+          await refreshHomeQueueSummary();
           haptic("success");
           qs("#registration-entry-form")?.reset();
           if (recordTypeInput) recordTypeInput.value = "convert";
@@ -984,6 +1039,7 @@ const DCLM_APP = (function () {
 
   function initFellowshipBindings() {
     const select = qs("#fellowship_id");
+    const groupSelect = qs("#fellowship_group");
     const today = todayISO();
     for (const id of ["fellowship_attendance_date", "fellowship_offering_date"]) {
       const input = qs(`#${id}`);
@@ -1034,7 +1090,8 @@ const DCLM_APP = (function () {
         location_id: assignedLocation?.location_id || window.DCLM_CURRENT_USER?.location_id || "",
         ...extra,
       });
-      showToast("Saved on this device. Church_server has not confirmed it yet.", "success");
+      showToast("Saved on this device. It is waiting to sync.", "success");
+      await refreshHomeQueueSummary();
       renderQueuesView();
     };
 
@@ -1056,10 +1113,16 @@ const DCLM_APP = (function () {
     qs("#btn-save-fellowship-member")?.addEventListener("click", async () => {
       const name = qs("#fellowship_member_name")?.value.trim() || "";
       const phone = qs("#fellowship_member_phone")?.value.trim() || "";
-      if (!name || name.length > 120 || phone.length > 30) { showToast("Enter a member name up to 120 characters and a phone up to 30 characters.", "warning"); return; }
-      await save("fellowship_members_queue", { name, phone: phone || null });
+      const address = qs("#fellowship_member_address")?.value.trim() || "";
+      const fellowshipGroup = groupSelect?.value || "";
+      if (!name || name.length > 120 || phone.length > 30 || !address || address.length > 300 || !fellowshipGroup) {
+        showToast("Enter the member name, fellowship group, home address (up to 300 characters), and phone up to 30 characters.", "warning");
+        return;
+      }
+      await save("fellowship_members_queue", { name, phone: phone || null, address, fellowship_group: fellowshipGroup });
       qs("#fellowship_member_name").value = "";
       qs("#fellowship_member_phone").value = "";
+      qs("#fellowship_member_address").value = "";
     });
   }
 
@@ -1223,6 +1286,17 @@ const DCLM_APP = (function () {
   // Settings Engine
   // -------------------------------------------------------------
   function initSettingsBindings() {
+    const user = window.DCLM_CURRENT_USER || {};
+    const userName = qs("#settings-user-name");
+    const userEmail = qs("#settings-user-email");
+    const userRole = qs("#settings-user-role");
+    const userLocation = qs("#settings-user-location");
+    if (userName) userName.textContent = user.name || "Field worker";
+    if (userEmail) userEmail.textContent = user.email || "Not provided";
+    if (userRole) userRole.textContent = (user.roles || []).join(", ") || "Field user";
+    if (userLocation) userLocation.textContent = user.location_id || "Not assigned";
+    updateNetworkStatus();
+
     // Clear worker roster cache
     const clearRosterBtn = qs("#btn-clear-roster-cache");
     if (clearRosterBtn) {
@@ -1295,16 +1369,19 @@ const DCLM_APP = (function () {
     } else if (activeScreen === "settings") {
       initSettingsBindings();
     }
+    await refreshHomeQueueSummary();
   });
 
   return {
     showToast,
     refreshActiveSetup,
+    refreshHomeQueueSummary,
     renderQueuesView,
     async discardQueueItem(storeName, key) {
       if (confirm("Discard this unsubmitted item?")) {
         await DCLM_DB.removeFromQueue(storeName, key);
         renderQueuesView();
+        await refreshHomeQueueSummary();
         showToast("Item discarded.", "info");
       }
     },
@@ -1312,6 +1389,7 @@ const DCLM_APP = (function () {
       if (confirm("Discard all unsubmitted attendance records?")) {
         await DCLM_DB.clearQueue("attendance_queue");
         renderQueuesView();
+        await refreshHomeQueueSummary();
         showToast("Attendance queue cleared.", "info");
       }
     },

@@ -5,13 +5,14 @@ from typing import Any
 from fasthtml.common import Button, Div, H3, Input, Label, Option, P, Select, Small
 from faststrap import Card, Col, Row
 
+from ...core.constants import FELLOWSHIP_GROUPS
 from ..components.shell import app_shell
 
 
 def setup_fellowship_routes(app: Any) -> None:
     @app.get("/fellowship")
     def fellowship_page():
-        select = Select(Option("Loading assigned fellowships…", value=""), id="fellowship_id",
+        select = Select(Option("Choose your house fellowship", value=""), id="fellowship_id",
                         cls="form-select rounded-3", required=True)
         attendance = Card(
             H3("Fellowship Attendance", cls="h6 fw-bold mb-2"),
@@ -45,8 +46,14 @@ def setup_fellowship_routes(app: Any) -> None:
             P("Only collect details needed to connect this person with the fellowship.", cls="text-muted small"),
             Label("Full name", for_="fellowship_member_name", cls="form-label small fw-semibold"),
             Input(id="fellowship_member_name", maxlength="120", cls="form-control mb-2", required=True),
+            Label("Fellowship group", for_="fellowship_group", cls="form-label small fw-semibold"),
+            Select(Option("Select a group", value=""), *[Option(label, value=key) for key, label in FELLOWSHIP_GROUPS],
+                   id="fellowship_group", cls="form-select mb-2", required=True),
             Label("Phone (optional)", for_="fellowship_member_phone", cls="form-label small fw-semibold"),
             Input(id="fellowship_member_phone", type="tel", maxlength="30", cls="form-control mb-3"),
+            Label("Home address", for_="fellowship_member_address", cls="form-label small fw-semibold"),
+            Input(id="fellowship_member_address", maxlength="300", autocomplete="street-address",
+                  cls="form-control mb-3", required=True),
             Button("Save member on this device", type="button", id="btn-save-fellowship-member", cls="btn btn-outline-primary w-100 rounded-pill"),
             cls="dclm-card mb-3 p-3",
         )
@@ -54,8 +61,8 @@ def setup_fellowship_routes(app: Any) -> None:
             active_screen="fellowship", page_title="Home Fellowship",
             subtitle="Capture one report at a time for an authorized house fellowship.",
             content=Div(
-                Card(Label("Assigned fellowship", for_="fellowship_id", cls="form-label small fw-semibold"), select,
-                     Small("Fellowships are loaded from Church_server and limited to your assigned location.", cls="text-muted d-block mt-2"),
+                Card(Label("Fellowship", for_="fellowship_id", cls="form-label small fw-semibold"), select,
+                     Small("Choose the authorized fellowship. Member group is selected separately in member intake.", cls="text-muted d-block mt-2"),
                      cls="dclm-card mb-3 p-3"),
                 attendance, finance, member, id="fellowship-content-wrap",
             ),

@@ -26,7 +26,7 @@ def _response_error(exc: Exception) -> JSONResponse:
         detail = exc.detail
     else:
         status_code = 502
-        detail = "Church_server could not be reached. Your saved records are still on this device."
+        detail = "The church records service could not be reached. Your saved records are still on this device."
     return JSONResponse({"ok": False, "error": detail}, status_code=status_code)
 
 
@@ -95,7 +95,7 @@ def setup_api_proxy_routes(app: Any) -> None:
         user = session.get("user", {})
         location_id = str(user.get("location_id") or "")
         if not location_id:
-            return JSONResponse({"ok": False, "error": "This account has no assigned Church_server location."}, status_code=422)
+            return JSONResponse({"ok": False, "error": "This account has no assigned church location."}, status_code=422)
         try:
             location = await backend_client.get_location(location_id, session["access_token"])
         except Exception as exc:
@@ -202,7 +202,7 @@ def setup_api_proxy_routes(app: Any) -> None:
         user = session.get("user", {})
         location_id = str(user.get("location_id") or "")
         if not location_id:
-            return JSONResponse({"ok": False, "error": "This account has no assigned Church_server location."}, status_code=422)
+            return JSONResponse({"ok": False, "error": "This account has no assigned church location."}, status_code=422)
         try:
             location = await backend_client.get_location(location_id, session["access_token"])
             fellowships = await backend_client.get_fellowships(location_id, session["access_token"])
@@ -278,7 +278,7 @@ def setup_api_proxy_routes(app: Any) -> None:
             total += len(items)
             for index, item in enumerate(items):
                 event_resource = resource_name in {"counts", "offerings", "records", "worker_attendance"}
-                identity_keys = ("client_id", "location_id", "event_id") if event_resource else ("client_id", "fellowship_id")
+                identity_keys = ("client_id", "location_id") if event_resource else ("client_id", "fellowship_id")
                 if not isinstance(item, dict) or any(not item.get(key) for key in identity_keys):
                     return JSONResponse({
                         "ok": False,
@@ -288,11 +288,23 @@ def setup_api_proxy_routes(app: Any) -> None:
                     UUID(str(item["client_id"]))
                     if event_resource:
                         UUID(str(item["location_id"]))
-                        UUID(str(item["event_id"]))
+                        if item.get("event_id"):
+                            UUID(str(item["event_id"]))
                     else:
                         UUID(str(item["fellowship_id"]))
                 except (ValueError, TypeError, AttributeError):
                     return JSONResponse({"ok": False, "error": f"{resource_name}[{index}] contains an invalid UUID."}, status_code=422)
+                if event_resource:
+                    try:
+                        date.fromisoformat(str(item.get("date") or "")[:10])
+                    except ValueError:
+                        return JSONResponse({"ok": False, "error": f"{resource_name}[{index}] requires a valid service date."}, status_code=422)
+                    if not item.get("program_type") or not item.get("church_type"):
+                        return JSONResponse({"ok": False, "error": f"{resource_name}[{index}] requires church section and program type metadata."}, status_code=422)
+                    if not item.get("event_id") and not item.get("program_domain"):
+                        return JSONResponse({"ok": False, "error": f"{resource_name}[{index}] requires a program domain when no scheduled event is selected."}, status_code=422)
+                    if str(item.get("program_domain") or "").lower() == "crusade" and not item.get("event_id"):
+                        return JSONResponse({"ok": False, "error": f"{resource_name}[{index}] crusade submissions require a scheduled event."}, status_code=422)
                 if resource_name in {"fellowship_attendance", "fellowship_offerings"}:
                     raw_date = str(item.get("date") or "")
                     try:
@@ -301,8 +313,12 @@ def setup_api_proxy_routes(app: Any) -> None:
                         return JSONResponse({"ok": False, "error": f"{resource_name}[{index}] requires a valid ISO meeting date."}, status_code=422)
                 if resource_name == "fellowship_members":
                     name = str(item.get("name") or "").strip()
-                    if not name or len(name) > 120 or len(str(item.get("phone") or "")) > 30:
-                        return JSONResponse({"ok": False, "error": f"fellowship_members[{index}] contains an invalid name or phone."}, status_code=422)
+                    address = str(item.get("address") or "").strip()
+                    if (not name or len(name) > 120 or len(str(item.get("phone") or "")) > 30
+                            or not address or len(address) > 300):
+                        return JSONResponse({"ok": False, "error": f"fellowship_members[{index}] requires a valid name and home address; phone must be 30 characters or fewer."}, status_code=422)
+                    if item.get("fellowship_group") not in {"adult", "young_adult", "campus", "youth", "children"}:
+                        return JSONResponse({"ok": False, "error": f"fellowship_members[{index}] requires a valid fellowship group."}, status_code=422)
                 if resource_name == "fellowship_offerings":
                     try:
                         amount = float(item.get("amount"))

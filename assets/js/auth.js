@@ -51,7 +51,8 @@
       await saveOfflineUser(result.user);
       window.location.replace("/");
     } catch (error) {
-      errorBox.textContent = error.message || "Unable to sign in. Check your connection and try again.";
+      errorBox.textContent = (error.message || "Unable to sign in. Check your connection and try again.")
+        .replace(/Church_server/gi, "church records service");
       errorBox.classList.remove("d-none");
       button.disabled = false;
       button.textContent = "Sign in";

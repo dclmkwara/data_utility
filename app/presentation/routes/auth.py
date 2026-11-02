@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from fasthtml.common import Body, Button, Div, Form, H1, Input, Label, Main, P, Small, Title
+from fasthtml.common import Body, Button, Div, Form, H1, Img, Input, Label, Main, P, Small, Title
 from faststrap import Card
 
 from ...core.config import APP_NAME
@@ -25,7 +25,7 @@ def setup_auth_routes(app: Any) -> None:
                       autocomplete="current-password", placeholder="Your password", cls="form-control"),
                 cls="mb-3",
             ),
-            P("Sign in with your approved Church_server field account.", cls="text-muted small"),
+            P("Sign in with your approved field account.", cls="text-muted small"),
             Div(id="login-error", role="alert", aria_live="polite", cls="alert alert-danger d-none"),
             Button("Sign in", type="submit", id="login-submit", cls="btn btn-primary w-100 py-2"),
             action="/api/auth/login", method="post", id="login-form",
@@ -36,7 +36,8 @@ def setup_auth_routes(app: Any) -> None:
             Body(
                 Main(
                     Div(
-                        Div("DCLM", cls="dclm-brand-mark mb-3"),
+                        Img(src="/assets/icon-512.png", alt="Deeper Life Bible Church logo",
+                            cls="dclm-login-logo mb-3"),
                         H1("Field Utility", cls="h3 fw-bold"),
                         P("Sign in to capture and synchronize church records.", cls="text-muted"),
                         card,

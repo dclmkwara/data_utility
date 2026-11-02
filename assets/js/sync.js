@@ -13,7 +13,8 @@ const DCLM_SYNC = (function () {
   function payloadFor(group, item) {
     if (group.field === "fellowship_members") return {
       client_id: item.client_id, fellowship_id: item.fellowship_id,
-      name: item.name, phone: item.phone || null, role: "member",
+      name: item.name, phone: item.phone || null, address: item.address || null,
+      fellowship_group: item.fellowship_group, role: "member",
     };
     if (group.field === "fellowship_attendance") return {
       client_id: item.client_id, fellowship_id: item.fellowship_id,
@@ -26,7 +27,9 @@ const DCLM_SYNC = (function () {
       date: item.date, amount: String(item.amount), note: item.note || null,
     };
     if (group.field === "counts") return {
-      client_id: item.client_id, event_id: item.event_id, location_id: item.location_id,
+      client_id: item.client_id, event_id: item.event_id || null, location_id: item.location_id,
+      date: `${item.service_date}T00:00:00Z`, church_type: item.church_type,
+      program_domain: item.program_domain, program_type: item.program_type,
       assignment_id: item.assignment_id || null,
       adult_male: Number(item.adult_male || 0), adult_female: Number(item.adult_female || 0),
       youth_male: Number(item.youth_male || 0), youth_female: Number(item.youth_female || 0),
@@ -34,18 +37,24 @@ const DCLM_SYNC = (function () {
       submission_channel: "field_utility",
     };
     if (group.field === "offerings") return {
-      client_id: item.client_id, event_id: item.event_id, location_id: item.location_id,
+      client_id: item.client_id, event_id: item.event_id || null, location_id: item.location_id,
+      date: `${item.service_date}T00:00:00Z`, church_type: item.church_type,
+      program_domain: item.program_domain, program_type: item.program_type,
       amount: String(item.amount), payment_method: item.payment_method || "cash",
       fund_type: item.fund_type || "offering", note: item.note || null,
     };
     if (group.field === "records") return {
-      client_id: item.client_id, event_id: item.event_id, location_id: item.location_id,
+      client_id: item.client_id, event_id: item.event_id || null, location_id: item.location_id,
+      date: `${item.service_date}T00:00:00Z`, church_type: item.church_type,
+      program_domain: item.program_domain, program_type: item.program_type,
       assignment_id: item.assignment_id || null,
       record_type: item.record_type, name: item.name, gender: item.gender, phone: item.phone,
       details: item.details || {}, note: item.note || null, submission_channel: "field_utility",
     };
     return {
-      client_id: item.client_id, event_id: item.event_id, location_id: item.location_id,
+      client_id: item.client_id, event_id: item.event_id || null, location_id: item.location_id,
+      date: `${item.service_date}T00:00:00Z`, church_type: item.church_type,
+      program_domain: item.program_domain, program_type: item.program_type,
       worker_id: item.worker_id, status: item.status || "present", reason: item.reason || null,
       note: item.note || null,
     };
@@ -71,18 +80,20 @@ const DCLM_SYNC = (function () {
       const fellowshipEntry = entry.group.field.startsWith("fellowship_");
       if (!entry.item.client_id || (fellowshipEntry
         ? !entry.item.fellowship_id
-        : (!entry.item.location_id || !entry.item.event_id))) {
+        : (!entry.item.location_id || !entry.item.service_date || !entry.item.program_type || !entry.item.church_type
+          || (!entry.item.event_id && !entry.item.program_domain)
+          || (!entry.item.event_id && String(entry.item.program_domain).toLowerCase() === "crusade")))) {
         failed += 1;
         await DCLM_DB.addToQueue(entry.group.store, {
           ...entry.item,
           last_error: fellowshipEntry
             ? "Select an authorized fellowship before syncing this record."
-            : "Select a valid event and location before syncing this record.",
+            : "Add the location, service date, program type, and required scheduled event before syncing.",
         });
       } else eligible.push(entry);
     }
     if (!eligible.length) {
-      DCLM_APP.showToast(`${failed} record(s) need a valid event, location, or fellowship before they can sync.`, "warning");
+      DCLM_APP.showToast(`${failed} record(s) need valid service details, a required scheduled event, or a fellowship before they can sync.`, "warning");
       return { ok: false, synced: 0, failed };
     }
 
@@ -113,7 +124,7 @@ const DCLM_SYNC = (function () {
         result = await response.json();
         if (!response.ok || result.ok === false) throw new Error(result.error || `Server rejected batch (${response.status})`);
       } catch (error) {
-        networkError = error.message || "Unable to contact Church_server.";
+        networkError = error.message || "Unable to contact the church records service.";
         for (const group of groups) {
           const updates = attempted.filter((entry) => entry.group.store === group.store).map(({ item }) => ({
             ...item, status: "pending", last_error: networkError,
@@ -134,18 +145,18 @@ const DCLM_SYNC = (function () {
           : null;
         if (outcome && ["synced", "duplicate"].includes(outcome.status)) {
           if (group.field === "worker_attendance") {
-            await DCLM_DB.confirmAttendance(item.worker_id, item.event_id);
+            await DCLM_DB.confirmAttendance(item.worker_id, item.context_key || item.event_id);
           }
           await DCLM_DB.addToQueue("recent_submissions", {
             client_id: item.client_id, type: group.label, synced_at: now, outcome: outcome.status,
             location_id: item.location_id, service_date: item.service_date || null,
-            event_id: item.event_id, worker_id: item.worker_id || null,
+            event_id: item.event_id, context_key: item.context_key || null, worker_id: item.worker_id || null,
           });
           await DCLM_DB.removeFromQueue(group.store, item.client_id);
           synced += 1;
         } else {
           failed += 1;
-          const message = String(outcome?.error || "Church_server did not confirm this record.").slice(0, 300);
+          const message = String(outcome?.error || "The church records service did not confirm this record.").slice(0, 300);
           await DCLM_DB.addToQueue(group.store, { ...attemptedItem, status: "pending", last_error: message });
         }
       }
@@ -153,12 +164,13 @@ const DCLM_SYNC = (function () {
     }
 
     if (typeof DCLM_APP.renderQueuesView === "function") await DCLM_APP.renderQueuesView();
+    if (typeof DCLM_APP.refreshHomeQueueSummary === "function") await DCLM_APP.refreshHomeQueueSummary();
     if (networkError) {
       DCLM_APP.showToast(`${synced} confirmed; remaining records are still saved. Sync stopped: ${networkError}`, "warning");
       return { ok: false, synced, failed, error: networkError };
     }
     if (failed) DCLM_APP.showToast(`${synced} confirmed; ${failed} remain queued for correction.`, "warning");
-    else DCLM_APP.showToast(`${synced} record(s) confirmed by Church_server.`, "success");
+    else DCLM_APP.showToast(`${synced} record(s) confirmed by the church records service.`, "success");
     return { ok: failed === 0, synced, failed };
   }
 

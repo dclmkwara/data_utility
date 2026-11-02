@@ -211,7 +211,7 @@ const DCLM_DB = (function () {
         this.getAllFromQueue("attendance_confirmed"),
       ]);
       return new Set([...pending, ...recent, ...confirmed]
-        .filter((item) => String(item.event_id || "") === String(eventId)
+        .filter((item) => String(item.context_key || item.event_id || "") === String(eventId)
           && (item.type === undefined || item.type === "Attendance"))
         .map((item) => String(item.worker_id || ""))
         .filter(Boolean));
@@ -224,6 +224,7 @@ const DCLM_DB = (function () {
         cache_key: `${ownerId}:${eventId}:${workerId}`,
         owner_id: ownerId,
         event_id: eventId,
+        context_key: eventId,
         worker_id: workerId,
         confirmed_at: new Date().toISOString(),
       })));

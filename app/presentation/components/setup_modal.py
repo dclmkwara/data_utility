@@ -52,7 +52,7 @@ def setup_modal() -> Any:
         Div(
             Label("4. Assigned Church Location", for_="modal_location_label", cls="form-label small fw-bold text-muted mb-1"),
             Input(id="modal_location_label", type="text", cls="form-control rounded-3 mb-1 bg-light", readonly=True,
-                  placeholder="Loaded from your Church_server account"),
+                  placeholder="Loaded from your signed-in account"),
             Input(id="modal_location_id", type="hidden"),
             Small("Your signed-in account determines the authorized location.", cls="form-text d-block mb-3"),
             cls="mb-1"
@@ -68,10 +68,10 @@ def setup_modal() -> Any:
             cls="mb-1"
         ),
         Div(
-            Label("7. Program Event", for_="modal_event_id", cls="form-label small fw-bold text-muted mb-1"),
+            Label("7. Scheduled Event (optional)", for_="modal_event_id", cls="form-label small fw-bold text-muted mb-1"),
             Select(Option("Select date and program first", value=""), id="modal_event_id",
-                   cls="form-select rounded-3 mb-1", required=True, disabled=True),
-            Small("Choose the matching event created in Church_server. Records cannot sync without it.",
+                   cls="form-select rounded-3 mb-1", disabled=True),
+            Small("Routine reports use the service metadata above. Crusade reports must select their scheduled event.",
                   cls="form-text d-block mb-3"),
         ),
         Div(

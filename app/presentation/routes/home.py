@@ -22,7 +22,27 @@ def setup_home_routes(app: Any) -> None:
             cls=f"dclm-card dclm-card--navy mb-3 {Fx.base} {Fx.fade_in}"
         )
 
-        # 4 Primary Operational Tool Cards
+        queue_card = A(
+            Div(
+                Div(
+                    I(cls="bi bi-cloud-arrow-up-fill fs-4 text-primary me-3"),
+                    Div(
+                        H3("Pending uploads", cls="h6 fw-bold text-dark mb-1"),
+                        Small("Your saved records stay on this device until they sync.",
+                              id="home-queue-caption", cls="text-muted d-block"),
+                    ),
+                    cls="d-flex align-items-center min-w-0",
+                ),
+                Span("Checking…", id="home-queue-count", cls="badge text-bg-light border"),
+                cls="d-flex align-items-center justify-content-between gap-2 p-3",
+            ),
+            href="/queues",
+            id="home-queue-card",
+            cls="dclm-card d-block text-decoration-none mb-3",
+            aria_label="Review pending uploads",
+        )
+
+        # Four primary tools; the sync queue is promoted above this grid.
         tools_grid = Row(
             Col(
                 A(
@@ -66,19 +86,6 @@ def setup_home_routes(app: Any) -> None:
             Col(
                 A(
                     Div(
-                        I(cls="bi bi-cloud-arrow-up-fill text-warning fs-1 mb-2 d-block"),
-                        H3("Pending Queues", cls="h6 fw-bold text-dark mb-1"),
-                        Small("Review offline batches & sync to cloud", cls="text-muted d-block"),
-                        cls="p-3 text-center"
-                    ),
-                    href="/queues",
-                    cls=f"dclm-card d-block text-decoration-none h-100 {Fx.base} {Fx.hover_lift}"
-                ),
-                cols=6, cls="mb-3"
-            ),
-            Col(
-                A(
-                    Div(
                         I(cls="bi bi-house-heart-fill text-danger fs-1 mb-2 d-block"),
                         H3("Home Fellowship", cls="h6 fw-bold text-dark mb-1"),
                         Small("Attendance, member intake & fellowship offering", cls="text-muted d-block"),
@@ -112,14 +119,14 @@ def setup_home_routes(app: Any) -> None:
                     Div(
                         I(cls="bi bi-sliders fs-4 text-secondary me-3"),
                         Div(
-                            Span("Ecclesiastical Setup", cls="fw-bold text-dark d-block"),
-                            Small("Verify church wing, location code & date", cls="text-muted"),
+                            Span("Service setup", cls="fw-bold text-dark d-block"),
+                            Small("Choose the church section and service details", cls="text-muted"),
                         ),
                         cls="d-flex align-items-center"
                     ),
                     I(cls="bi bi-chevron-right text-muted"),
                     href="/setup",
-                    cls="text-decoration-none d-flex justify-content-between align-items-center p-2 border-bottom"
+                    cls="text-decoration-none d-flex justify-content-between align-items-center p-2 mb-2 border-bottom"
                 ),
                 A(
                     Div(
@@ -143,6 +150,7 @@ def setup_home_routes(app: Any) -> None:
             page_title="Home",
             content=Div(
                 hero_card,
+                queue_card,
                 tools_grid,
                 secondary_card,
                 cls="dclm-page-content"

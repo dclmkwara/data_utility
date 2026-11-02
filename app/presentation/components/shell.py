@@ -31,8 +31,9 @@ def top_bar(active_screen: str, page_title: str) -> Any:
                 Span("", id="auth-user-name", title="Signed-in field account", cls="dclm-user-chip"),
                 A(
                     I(cls="bi bi-gear-fill"),
-                    href="/setup",
-                    title="Setup Configuration",
+                    href="/settings",
+                    title="App settings",
+                    aria_label="App settings",
                     cls="btn btn-sm btn-light rounded-circle ms-2 text-secondary d-flex align-items-center justify-content-center",
                     style="width: 36px; height: 36px;"
                 ),
@@ -62,7 +63,6 @@ def bottom_nav_bar(active_screen: str) -> Any:
             BottomNavItem("Attendance", href="/attendance", active=active_screen == "attendance", icon="person-check"),
             BottomNavItem("Register", href="/registration", active=active_screen == "registration", icon="person-plus"),
             BottomNavItem("Fellowship", href="/fellowship", active=active_screen == "fellowship", icon="house-heart"),
-            BottomNavItem("Queue", href="/queues", active=active_screen == "queues", icon="cloud-arrow-up"),
             variant="light",
             fixed=True,
             cls="dclm-bottom-nav"
