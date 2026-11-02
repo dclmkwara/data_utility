@@ -39,6 +39,11 @@ def _fernet() -> Fernet:
     return Fernet(base64.urlsafe_b64encode(derived))
 
 
+def validate_session_configuration() -> None:
+    """Validate encryption-key availability during production startup."""
+    _fernet()
+
+
 def encode_session(access_token: str, refresh_token: str, user: dict[str, Any]) -> str:
     payload = json.dumps(
         {"access_token": access_token, "refresh_token": refresh_token, "user": user},

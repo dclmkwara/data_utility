@@ -12,6 +12,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from app.presentation.app_factory import create_app
+from app.main import app as cloud_app
 from app.presentation.routes.api_proxy import backend_client
 from app.schemas.identity import SetupIdentity, validate_location_code
 from app.schemas.counts import CountItem
@@ -46,6 +47,26 @@ def test_core_routes_render():
         response = client.get(path)
         assert response.status_code == 200, f"Path {path} returned {response.status_code}"
         assert "DCLM" in response.text
+
+
+def test_production_session_configuration_requires_an_explicit_key(monkeypatch):
+    from app.services import auth_session
+
+    monkeypatch.setattr(auth_session, "APP_ENV", "production")
+    monkeypatch.delenv("UTILITY_SESSION_KEY", raising=False)
+    import pytest
+    with pytest.raises(RuntimeError, match="UTILITY_SESSION_KEY must be configured"):
+        auth_session.validate_session_configuration()
+
+    monkeypatch.setenv("UTILITY_SESSION_KEY", "synthetic-deployment-test-key")
+    auth_session.validate_session_configuration()
+
+
+def test_fastapi_cloud_entrypoint_mounts_fasthtml_routes_and_health():
+    cloud_client = TestClient(cloud_app)
+    assert cloud_client.get("/health").json()["status"] == "ok"
+    assert cloud_client.get("/login").status_code == 200
+    assert cloud_client.get("/counter").status_code == 200
 
 
 def test_service_worker_is_available_at_root_scope():
