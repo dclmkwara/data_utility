@@ -9,8 +9,9 @@ from pydantic import BaseModel, Field
 class RecordItem(BaseModel):
     """Registration record matching backend RecordCreate."""
     client_id: UUID = Field(default_factory=uuid4)
-    event_id: Optional[UUID] = None
-    location_id: str
+    event_id: UUID
+    location_id: UUID
+    assignment_id: Optional[UUID] = None
     record_type: Literal["newcomer", "convert"]
     name: str
     gender: Literal["Male", "Female"]

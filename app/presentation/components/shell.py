@@ -61,6 +61,7 @@ def bottom_nav_bar(active_screen: str) -> Any:
             BottomNavItem("Counter", href="/counter", active=active_screen == "counter", icon="plus-slash-minus"),
             BottomNavItem("Attendance", href="/attendance", active=active_screen == "attendance", icon="person-check"),
             BottomNavItem("Register", href="/registration", active=active_screen == "registration", icon="person-plus"),
+            BottomNavItem("Fellowship", href="/fellowship", active=active_screen == "fellowship", icon="house-heart"),
             BottomNavItem("Queue", href="/queues", active=active_screen == "queues", icon="cloud-arrow-up"),
             variant="light",
             fixed=True,

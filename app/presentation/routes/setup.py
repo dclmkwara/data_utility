@@ -5,8 +5,7 @@ from typing import Any
 from fasthtml.common import Button, Div, Form, H2, H3, I, Input, Label, Option, P, Select, Small, Span
 from faststrap import Card, Col, Fx, Row
 
-from ...core.constants import CHURCH_TYPES, PROGRAM_DOMAINS, PROGRAM_LEVELS, PROGRAM_TYPES_BY_DOMAIN
-from ...schemas.identity import location_placeholder_for_level
+from ...core.constants import CHURCH_TYPES, PROGRAM_DOMAINS, PROGRAM_TYPES_BY_DOMAIN
 from ..components.shell import app_shell
 
 
@@ -57,30 +56,13 @@ def setup_setup_routes(app: Any) -> None:
                     ),
                 ),
 
-                # 4. Program Level
+                Input(id="page_program_level", type="hidden", value="Local"),
                 Div(
-                    Label("4. Ecclesiastical Level *", for_="page_program_level", cls="form-label small fw-bold text-muted mb-1"),
-                    Select(
-                        Option("Select Level...", value=""),
-                        *[Option(label, value=key) for key, label in PROGRAM_LEVELS],
-                        id="page_program_level",
-                        cls="form-select rounded-3 mb-3",
-                        required=True,
-                    ),
-                ),
-
-                # 5. Location Code
-                Div(
-                    Label("5. Location Code (Hierarchy ID) *", for_="page_location_id", cls="form-label small fw-bold text-muted mb-1"),
-                    Input(
-                        id="page_location_id",
-                        type="text",
-                        placeholder=location_placeholder_for_level("Local"),
-                        cls="form-control rounded-3 font-monospace mb-1 text-uppercase",
-                        autocomplete="off",
-                        required=True,
-                    ),
-                    Div(id="page_location_feedback", cls="form-text small mb-3"),
+                    Label("4. Assigned Church Location", for_="page_location_label", cls="form-label small fw-bold text-muted mb-1"),
+                    Input(id="page_location_label", type="text", cls="form-control rounded-3 mb-1 bg-light", readonly=True,
+                          placeholder="Loaded from your Church_server account"),
+                    Input(id="page_location_id", type="hidden"),
+                    Small("Your signed-in account determines the authorized location.", cls="form-text d-block mb-3"),
                 ),
 
                 # 6. Service Date
@@ -96,7 +78,7 @@ def setup_setup_routes(app: Any) -> None:
 
                 Div(
                     Label("7. Program Event *", for_="page_event_id", cls="form-label small fw-bold text-muted mb-1"),
-                    Select(Option("Select location, date, and program first", value=""), id="page_event_id",
+                    Select(Option("Select date and program first", value=""), id="page_event_id",
                            cls="form-select rounded-3 mb-1", required=True, disabled=True),
                     Small("Choose the matching event created in Church_server. Records cannot sync without it.",
                           cls="form-text d-block mb-3"),

@@ -5,7 +5,7 @@
 
 const DCLM_DB = (function () {
   const DB_NAME = "dclm_field_utility_db";
-  const DB_VERSION = 5;
+  const DB_VERSION = 6;
 
   const STORES = {
     active_setup: "key",             // Active Ecclesiastical Identity
@@ -14,6 +14,9 @@ const DCLM_DB = (function () {
     offerings_queue: "client_id",     // Unsubmitted Offerings & Tithes
     attendance_queue: "client_id",    // Unsubmitted Marked Attendance
     registration_queue: "client_id",  // Unsubmitted Converts & Newcomers
+    fellowship_members_queue: "client_id",
+    fellowship_attendance_queue: "client_id",
+    fellowship_offerings_queue: "client_id",
     recent_submissions: "client_id",  // Confirmed synced history
     auth_state: "key",                 // Last authorized profile only; never tokens
     count_draft: "key",                // In-progress demographic count per account
@@ -172,11 +175,14 @@ const DCLM_DB = (function () {
       return performTx(storeName, "readonly", (store) => {
         return reqToPromise(store.getAll()).then((items) => items
           .filter((item) => item.owner_id === ownerId)
-          .map((item) => ({
-            ...item,
-            status: item.status === "syncing" ? "pending" : (item.status || "pending"),
-            attempt_count: Number(item.attempt_count || 0),
-          })));
+          .map((item) => ["counts_queue", "offerings_queue", "attendance_queue", "registration_queue", "fellowship_members_queue", "fellowship_attendance_queue", "fellowship_offerings_queue"].includes(storeName)
+            ? {
+              ...item,
+              status: item.status === "syncing" ? "pending" : (item.status || "pending"),
+              attempt_count: Number(item.attempt_count || 0),
+              attempt_count: Number(item.attempt_count || 0),
+            }
+            : item));
       });
     },
 
@@ -224,7 +230,7 @@ const DCLM_DB = (function () {
     },
 
     async getUnassignedQueueCount() {
-      const queueNames = ["counts_queue", "offerings_queue", "attendance_queue", "registration_queue"];
+      const queueNames = ["counts_queue", "offerings_queue", "attendance_queue", "registration_queue", "fellowship_members_queue", "fellowship_attendance_queue", "fellowship_offerings_queue"];
       const db = await openDatabase();
       const ownerId = currentOwnerId();
       if (!ownerId) return 0;
@@ -243,7 +249,7 @@ const DCLM_DB = (function () {
     async claimUnassignedQueueItems() {
       const ownerId = currentOwnerId();
       if (!ownerId) throw new Error("Sign in before assigning saved records.");
-      const queueNames = ["counts_queue", "offerings_queue", "attendance_queue", "registration_queue"];
+      const queueNames = ["counts_queue", "offerings_queue", "attendance_queue", "registration_queue", "fellowship_members_queue", "fellowship_attendance_queue", "fellowship_offerings_queue"];
       const db = await openDatabase();
       return new Promise((resolve, reject) => {
         const tx = db.transaction(queueNames, "readwrite");
@@ -288,6 +294,20 @@ const DCLM_DB = (function () {
         store.delete("session_status");
         return reqToPromise(store.put({ key: "current_user", ...user }));
       });
+    },
+
+    async saveFellowshipContext(context) {
+      const ownerId = currentOwnerId();
+      if (!ownerId) return;
+      return performTx("active_setup", "readwrite", (store) => reqToPromise(store.put({
+        key: `fellowship_context:${ownerId}`, owner_id: ownerId, ...context,
+      })));
+    },
+
+    async getFellowshipContext() {
+      const ownerId = currentOwnerId();
+      if (!ownerId) return null;
+      return performTx("active_setup", "readonly", (store) => reqToPromise(store.get(`fellowship_context:${ownerId}`)));
     },
 
     async getAuthState() {
@@ -342,13 +362,20 @@ const DCLM_DB = (function () {
       const offerings = await this.getAllFromQueue("offerings_queue");
       const attendance = await this.getAllFromQueue("attendance_queue");
       const registrations = await this.getAllFromQueue("registration_queue");
+      const fellowshipMembers = await this.getAllFromQueue("fellowship_members_queue");
+      const fellowshipAttendance = await this.getAllFromQueue("fellowship_attendance_queue");
+      const fellowshipOfferings = await this.getAllFromQueue("fellowship_offerings_queue");
 
       return {
         counts: counts.length,
         offerings: offerings.length,
         attendance: attendance.length,
         registrations: registrations.length,
-        total: counts.length + offerings.length + attendance.length + registrations.length,
+        fellowship_members: fellowshipMembers.length,
+        fellowship_attendance: fellowshipAttendance.length,
+        fellowship_offerings: fellowshipOfferings.length,
+        total: counts.length + offerings.length + attendance.length + registrations.length
+          + fellowshipMembers.length + fellowshipAttendance.length + fellowshipOfferings.length,
       };
     },
   };

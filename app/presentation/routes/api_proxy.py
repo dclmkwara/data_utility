@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 from typing import Any
+from uuid import UUID
+from datetime import date
 
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
@@ -40,6 +42,7 @@ def _actor_payload(user: dict[str, Any]) -> dict[str, Any]:
         "name": actor["name"],
         "email": actor["email"],
         "location_id": actor["location_id"],
+        "church_type": actor["church_type"],
         "roles": actor["roles"],
         "permissions": actor["permissions"],
     }
@@ -83,6 +86,30 @@ def setup_api_proxy_routes(app: Any) -> None:
         if not session:
             return JSONResponse({"ok": True, "authenticated": False})
         return JSONResponse({"ok": True, "authenticated": True, "user": session.get("user", {})})
+
+    @app.get("/api/location-context")
+    async def get_location_context(request: Request):
+        session = _session(request)
+        if not session:
+            return JSONResponse({"ok": False, "error": "Sign in to load your assigned location."}, status_code=401)
+        user = session.get("user", {})
+        location_id = str(user.get("location_id") or "")
+        if not location_id:
+            return JSONResponse({"ok": False, "error": "This account has no assigned Church_server location."}, status_code=422)
+        try:
+            location = await backend_client.get_location(location_id, session["access_token"])
+        except Exception as exc:
+            return _response_error(exc)
+        return JSONResponse({
+            "ok": True,
+            "location": {
+                "location_id": str(location.get("location_id") or location_id),
+                "location_name": str(location.get("location_name") or "Church location"),
+                "formatted_id": str(location.get("formatted_id") or location.get("location_code") or ""),
+                "church_type": str(location.get("church_type") or "DCLM"),
+                "program_level": "Local",
+            },
+        })
 
     @app.get("/api/auth/me")
     async def current_user(request: Request):
@@ -142,7 +169,7 @@ def setup_api_proxy_routes(app: Any) -> None:
         session = _session(request)
         if not session:
             return JSONResponse({"ok": False, "error": "Sign in to load workers.", "items": []}, status_code=401)
-        norm_loc = location_id.strip().upper()
+        norm_loc = location_id.strip()
         if not norm_loc:
             return JSONResponse({"ok": False, "error": "Location ID required.", "items": []}, status_code=400)
         try:
@@ -160,12 +187,35 @@ def setup_api_proxy_routes(app: Any) -> None:
             return JSONResponse({"ok": False, "error": "Location, service date, and program type are required.", "items": []}, status_code=400)
         try:
             items = await backend_client.get_events(
-                location_id=location_id.strip().upper(), service_date=date.strip(),
+                location_id=location_id.strip(), service_date=date.strip(),
                 program_type=program_type.strip(), access_token=session["access_token"],
             )
         except Exception as exc:
             return _response_error(exc)
         return JSONResponse({"ok": True, "source": "backend", "items": items})
+
+    @app.get("/api/fellowship-context")
+    async def get_fellowship_context(request: Request):
+        session = _session(request)
+        if not session:
+            return JSONResponse({"ok": False, "error": "Sign in to load your assigned location."}, status_code=401)
+        user = session.get("user", {})
+        location_id = str(user.get("location_id") or "")
+        if not location_id:
+            return JSONResponse({"ok": False, "error": "This account has no assigned Church_server location."}, status_code=422)
+        try:
+            location = await backend_client.get_location(location_id, session["access_token"])
+            fellowships = await backend_client.get_fellowships(location_id, session["access_token"])
+        except Exception as exc:
+            return _response_error(exc)
+        return JSONResponse({
+            "ok": True,
+            "location": {"location_id": location_id, "location_name": location.get("location_name"),
+                         "formatted_id": location.get("formatted_id") or location.get("location_code")},
+            "items": [{"fellowship_id": str(item.get("fellowship_id") or item.get("id") or ""),
+                       "name": str(item.get("fellowship_name") or item.get("name") or "House Fellowship"),
+                       "code": str(item.get("fellowship_code") or "")} for item in fellowships],
+        })
 
     @app.get("/api/events/{event_id}/field-assignments")
     async def get_field_assignments(request: Request, event_id: str, location_id: str = ""):
@@ -178,7 +228,7 @@ def setup_api_proxy_routes(app: Any) -> None:
             event = await backend_client.get_event(event_id, session["access_token"])
             is_alpha_crusade = (
                 event.get("event_mode") == "crusade"
-                and str(event.get("alpha_location_id") or "").upper() == location_id.strip().upper()
+                and str(event.get("alpha_location_id") or "") == location_id.strip()
             )
             if not is_alpha_crusade:
                 return JSONResponse({"ok": True, "required": False, "count_assignments": [], "convert_assignments": []})
@@ -227,11 +277,39 @@ def setup_api_proxy_routes(app: Any) -> None:
                 return JSONResponse({"ok": False, "error": f"{resource_name} must be a list."}, status_code=400)
             total += len(items)
             for index, item in enumerate(items):
-                if not isinstance(item, dict) or not item.get("client_id") or not item.get("location_id") or not item.get("event_id"):
+                event_resource = resource_name in {"counts", "offerings", "records", "worker_attendance"}
+                identity_keys = ("client_id", "location_id", "event_id") if event_resource else ("client_id", "fellowship_id")
+                if not isinstance(item, dict) or any(not item.get(key) for key in identity_keys):
                     return JSONResponse({
                         "ok": False,
-                        "error": f"{resource_name}[{index}] requires client_id, location_id, and a selected Church_server event_id.",
+                        "error": f"{resource_name}[{index}] requires {', '.join(identity_keys)}.",
                     }, status_code=422)
+                try:
+                    UUID(str(item["client_id"]))
+                    if event_resource:
+                        UUID(str(item["location_id"]))
+                        UUID(str(item["event_id"]))
+                    else:
+                        UUID(str(item["fellowship_id"]))
+                except (ValueError, TypeError, AttributeError):
+                    return JSONResponse({"ok": False, "error": f"{resource_name}[{index}] contains an invalid UUID."}, status_code=422)
+                if resource_name in {"fellowship_attendance", "fellowship_offerings"}:
+                    raw_date = str(item.get("date") or "")
+                    try:
+                        date.fromisoformat(raw_date[:10])
+                    except ValueError:
+                        return JSONResponse({"ok": False, "error": f"{resource_name}[{index}] requires a valid ISO meeting date."}, status_code=422)
+                if resource_name == "fellowship_members":
+                    name = str(item.get("name") or "").strip()
+                    if not name or len(name) > 120 or len(str(item.get("phone") or "")) > 30:
+                        return JSONResponse({"ok": False, "error": f"fellowship_members[{index}] contains an invalid name or phone."}, status_code=422)
+                if resource_name == "fellowship_offerings":
+                    try:
+                        amount = float(item.get("amount"))
+                    except (TypeError, ValueError):
+                        amount = 0
+                    if not amount > 0 or amount > 9999999999.99:
+                        return JSONResponse({"ok": False, "error": f"fellowship_offerings[{index}] requires a positive amount."}, status_code=422)
         if total > 500:
             return JSONResponse({"ok": False, "error": "Sync accepts at most 500 records per request. Retry in smaller batches."}, status_code=413)
         try:

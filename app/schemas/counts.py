@@ -9,8 +9,9 @@ from pydantic import BaseModel, Field
 class CountItem(BaseModel):
     """Client-side headcount record."""
     client_id: UUID = Field(default_factory=uuid4)
-    event_id: Optional[UUID] = None
-    location_id: str
+    event_id: UUID
+    location_id: UUID
+    assignment_id: Optional[UUID] = None
     adult_male: int = Field(0, ge=0)
     adult_female: int = Field(0, ge=0)
     youth_male: int = Field(0, ge=0)

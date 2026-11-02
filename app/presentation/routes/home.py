@@ -76,6 +76,19 @@ def setup_home_routes(app: Any) -> None:
                 ),
                 cols=6, cls="mb-3"
             ),
+            Col(
+                A(
+                    Div(
+                        I(cls="bi bi-house-heart-fill text-danger fs-1 mb-2 d-block"),
+                        H3("Home Fellowship", cls="h6 fw-bold text-dark mb-1"),
+                        Small("Attendance, member intake & fellowship offering", cls="text-muted d-block"),
+                        cls="p-3 text-center"
+                    ),
+                    href="/fellowship",
+                    cls=f"dclm-card d-block text-decoration-none h-100 {Fx.base} {Fx.hover_lift}"
+                ),
+                cols=6, cls="mb-3"
+            ),
             cls="g-2"
         )
 

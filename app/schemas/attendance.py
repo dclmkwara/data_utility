@@ -13,7 +13,7 @@ class WorkerRosterItem(BaseModel):
     name: str
     phone: str
     unit: Optional[str] = None
-    location_id: str
+    location_id: UUID
     location_name: Optional[str] = None
     church_type: Optional[str] = None
     marked_present: bool = False
@@ -23,8 +23,8 @@ class WorkerRosterItem(BaseModel):
 class WorkerAttendanceItem(BaseModel):
     """Attendance check record sent in batch sync."""
     client_id: UUID = Field(default_factory=uuid4)
-    event_id: Optional[UUID] = None
-    location_id: str
+    event_id: UUID
+    location_id: UUID
     worker_id: UUID
     status: Literal["present", "absent", "late", "excused"] = "present"
     reason: Optional[str] = None

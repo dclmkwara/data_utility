@@ -74,6 +74,30 @@ class BackendClient:
         self._raise_for_error(resp)
         return resp.json()
 
+    async def get_location(self, location_id: str, access_token: str) -> dict[str, Any]:
+        """Fetch the authenticated user's location metadata by its backend UUID."""
+        resp = await self._request(
+            "GET", f"/api/v1/locations/{location_id}",
+            headers={"Authorization": f"Bearer {access_token}"},
+        )
+        self._raise_for_error(resp)
+        data = resp.json()
+        if not isinstance(data, dict):
+            raise BackendAPIError(502, "Church_server returned invalid location metadata")
+        return data
+
+    async def get_fellowships(self, location_id: str, access_token: str) -> list[dict[str, Any]]:
+        resp = await self._request(
+            "GET", "/api/v1/fellowships/",
+            params={"location_id": location_id, "limit": 500},
+            headers={"Authorization": f"Bearer {access_token}"},
+        )
+        self._raise_for_error(resp)
+        data = resp.json()
+        if not isinstance(data, list):
+            raise BackendAPIError(502, "Church_server returned invalid fellowship data")
+        return data
+
     async def refresh(self, refresh_token: str) -> dict[str, Any]:
         resp = await self._request(
             "POST",
@@ -111,7 +135,7 @@ class BackendClient:
                 "name": item.get("full_name") or item.get("name") or "Church Worker",
                 "phone": item.get("phone") or "",
                 "unit": item.get("department") or item.get("unit") or "General Worker",
-                "location_id": location_id,
+                "location_id": str(item.get("location_id") or location_id),
                 "location_name": item.get("location_name"),
                 "church_type": item.get("church_type", "DCLM"),
             })
@@ -129,7 +153,10 @@ class BackendClient:
         data = resp.json()
         if not isinstance(data, list):
             raise BackendAPIError(502, "Church_server returned an invalid event list")
-        return data
+        return [
+            {**item, "location_id": str(item.get("alpha_location_id") or location_id)}
+            for item in data
+        ]
 
     async def get_event(self, event_id: str, access_token: str) -> dict[str, Any]:
         resp = await self._request(

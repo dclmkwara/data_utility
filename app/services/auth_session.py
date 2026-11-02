@@ -91,6 +91,7 @@ def public_user(user: dict[str, Any]) -> dict[str, Any]:
         "name": str(user.get("name") or "Church worker"),
         "email": str(user.get("email") or ""),
         "location_id": str(user.get("location_id") or ""),
+        "church_type": str(user.get("church_type") or "DCLM"),
         "roles": [str(role.get("role_name") or role.get("name") or "") for role in roles if isinstance(role, dict)],
         "permissions": [str(item) for item in (user.get("permissions") or [])],
     }

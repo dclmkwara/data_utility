@@ -1,5 +1,5 @@
 /**
- * DCLM Field Utility — Master Application Orchestrator
+ * DCLM Field Utility â€” Master Application Orchestrator
  * High-performance, offline-capable mobile workflows
  */
 
@@ -9,6 +9,8 @@ const DCLM_APP = (function () {
   const domainProgramTypes = boot.program_types_by_domain || {};
 
   let activeSetup = null;
+  let assignedLocation = null;
+  let assignedFellowships = [];
   let cachedRoster = [];
   let rosterState = "not_loaded";
 
@@ -103,7 +105,15 @@ const DCLM_APP = (function () {
     const shieldEl = qs("#setup-required-shield");
     const iconEl = qs("#identity-bar-icon");
 
-    if (activeSetup && activeSetup.location_id && activeSetup.event_id) {
+    if (activeScreen === "fellowship") {
+      if (barEl) barEl.className = "dclm-identity-bar is-active";
+      if (iconEl) iconEl.className = "bi bi-house-heart fs-5 me-2 text-primary";
+      if (titleEl) titleEl.textContent = assignedLocation?.location_name || "Home Fellowship";
+      if (subEl) subEl.textContent = "Choose the assigned fellowship below; event setup is not required.";
+      if (btnEl) btnEl.textContent = "Program setup";
+      if (shieldEl) shieldEl.classList.add("d-none");
+      qsa("[id$='-content-wrap']").forEach((el) => el.classList.remove("d-none"));
+    } else if (activeSetup && activeSetup.location_id && activeSetup.event_id) {
       if (barEl) {
         barEl.className = "dclm-identity-bar is-active";
       }
@@ -111,10 +121,10 @@ const DCLM_APP = (function () {
         iconEl.className = "bi bi-shield-check fs-5 me-2 text-primary";
       }
       if (titleEl) {
-        titleEl.textContent = `${activeSetup.church_type} • ${activeSetup.program_type} • ${activeSetup.location_id}`;
+        titleEl.textContent = `${activeSetup.church_type} â€¢ ${activeSetup.program_type} â€¢ ${activeSetup.location_id}`;
       }
       if (subEl) {
-        subEl.textContent = `Scope: ${activeSetup.program_level} Level • Date: ${activeSetup.service_date}`;
+        subEl.textContent = `Scope: ${activeSetup.program_level} Level â€¢ Date: ${activeSetup.service_date}`;
       }
       if (btnEl) btnEl.textContent = "Change";
       if (shieldEl) shieldEl.classList.add("d-none");
@@ -158,14 +168,50 @@ const DCLM_APP = (function () {
     });
   }
 
+  async function loadAssignedLocation() {
+    const apply = (location) => {
+      assignedLocation = location || null;
+      for (const prefix of ["page", "modal"]) {
+        const id = qs(`#${prefix}_location_id`);
+        const label = qs(`#${prefix}_location_label`);
+        const level = qs(`#${prefix}_program_level`);
+        if (id) id.value = location?.location_id || "";
+        if (label) label.value = location ? `${location.location_name} Â· ${location.formatted_id}` : "Location unavailable";
+        if (level) level.value = "Local";
+        const church = qs(`#${prefix}_church_type`);
+        if (church && location?.church_type && Array.from(church.options).some((option) => option.value === location.church_type)) {
+          church.value = location.church_type;
+        }
+      }
+    };
+    if (!navigator.onLine) {
+      const saved = await DCLM_DB.getAuthState();
+      const active = await DCLM_DB.getActiveSetup();
+      if (saved?.location_id && active?.location_label) {
+        apply({ location_id: active.assigned_location_id || saved.location_id, formatted_id: active.location_label, location_name: active.location_name || "Assigned location", church_type: saved.church_type || active.church_type || "DCLM" });
+      }
+      return;
+    }
+    try {
+      const response = await window.DCLM_AUTH.apiFetch("/api/location-context");
+      const data = await response.json();
+      if (!response.ok || !data.ok) throw new Error(data.error || "Could not load your assigned location.");
+      apply(data.location);
+      if (activeScreen === "fellowship") await refreshActiveSetup();
+    } catch (error) {
+      apply(null);
+      showToast(error.message, "warning");
+    }
+  }
+
   async function loadProgramEvents(prefix) {
     const select = qs(`#${prefix}_event_id`);
-    const locationId = qs(`#${prefix}_location_id`)?.value.trim().toUpperCase();
+    const locationId = qs(`#${prefix}_location_id`)?.value.trim();
     const serviceDate = qs(`#${prefix}_service_date`)?.value;
     const programType = qs(`#${prefix}_program_type`)?.value;
     if (!select) return;
     if (!locationId || !serviceDate || !programType) {
-      select.replaceChildren(new Option("Select location, date, and program first", ""));
+      select.replaceChildren(new Option("Select date and program first", ""));
       select.disabled = true;
       return;
     }
@@ -175,13 +221,13 @@ const DCLM_APP = (function () {
         && activeSetup?.program_type === programType
         && activeSetup?.event_id;
       const label = sameVerifiedContext
-        ? `${activeSetup.program_type} · ${activeSetup.service_date} · Previously verified (offline)`
+        ? `${activeSetup.program_type} Â· ${activeSetup.service_date} Â· Previously verified (offline)`
         : "Connect to load available Church_server events";
       select.replaceChildren(new Option(label, sameVerifiedContext ? activeSetup.event_id : ""));
       select.disabled = true;
       return;
     }
-    select.replaceChildren(new Option("Loading matching events…", ""));
+    select.replaceChildren(new Option("Loading matching eventsâ€¦", ""));
     select.disabled = true;
     try {
       const query = new URLSearchParams({ location_id: locationId, date: serviceDate, program_type: programType });
@@ -191,7 +237,9 @@ const DCLM_APP = (function () {
       const previous = select.value || (activeSetup?.location_id === locationId && activeSetup?.service_date === serviceDate ? activeSetup.event_id : "");
       const options = [new Option(data.items.length ? "Choose the service event" : "No matching events found", "")];
       for (const event of data.items) {
-        options.push(new Option([event.title || event.program_type?.name || programType, event.date, event.event_mode].filter(Boolean).join(" · "), event.id));
+        const option = new Option([event.title || event.program_type?.name || programType, event.date, event.event_mode].filter(Boolean).join(" · "), event.id);
+        option.dataset.locationId = event.location_id || locationId;
+        options.push(option);
       }
       select.replaceChildren(...options);
       if (previous && data.items.some((event) => String(event.id) === String(previous))) select.value = previous;
@@ -236,7 +284,7 @@ const DCLM_APP = (function () {
   }
 
   async function handleSaveSetup(formData) {
-    const normalizedLocation = (formData.location_id || "").trim().toUpperCase();
+    const normalizedLocation = (formData.location_id || assignedLocation?.location_id || "").trim();
     const selectedEventId = formData.event_id || (
       activeSetup?.location_id === normalizedLocation
       && activeSetup?.service_date === formData.service_date
@@ -245,21 +293,26 @@ const DCLM_APP = (function () {
         : ""
     );
     let countAssignment;
+    const eventOption = ["modal_event_id", "page_event_id"].map((id) => qs(`#${id}`)).find((el) => el?.value === selectedEventId)?.selectedOptions?.[0];
+    const eventLocationId = eventOption?.dataset.locationId || normalizedLocation;
     try {
       countAssignment = await resolveEventAssignments(
         selectedEventId,
-        normalizedLocation,
+        eventLocationId,
       );
     } catch (error) {
       showToast(error.message, "warning");
       return false;
     }
     const identity = {
-      church_type: formData.church_type,
       program_domain: formData.program_domain,
       program_type: formData.program_type,
       program_level: formData.program_level,
-      location_id: (formData.location_id || "").trim().toUpperCase(),
+      location_id: eventLocationId,
+      assigned_location_id: assignedLocation?.location_id || normalizedLocation,
+      location_label: assignedLocation?.formatted_id || assignedLocation?.location_name || "Assigned location",
+      location_name: assignedLocation?.location_name || "",
+      church_type: formData.church_type || assignedLocation?.church_type || "DCLM",
       service_date: formData.service_date || todayISO(),
       event_id: selectedEventId,
       requires_count_assignment: countAssignment.requires_count_assignment,
@@ -290,13 +343,14 @@ const DCLM_APP = (function () {
     haptic("success");
 
     // Fetch and cache location worker roster immediately
-    fetchLocationRoster(identity.location_id);
+    fetchLocationRoster(identity.assigned_location_id || identity.location_id);
 
     await refreshActiveSetup();
     return true;
   }
 
   function initSetupBindings() {
+    loadAssignedLocation();
     bindDomainTypeSync("modal_program_domain", "modal_program_type");
     bindDomainTypeSync("page_program_domain", "page_program_type");
 
@@ -305,7 +359,7 @@ const DCLM_APP = (function () {
     if (modalSaveBtn) {
       modalSaveBtn.addEventListener("click", async () => {
         const success = await handleSaveSetup({
-          church_type: qs("#modal_church_type")?.value,
+          church_type: qs("#modal_church_type")?.value || assignedLocation?.church_type || "DCLM",
           program_domain: qs("#modal_program_domain")?.value,
           program_type: qs("#modal_program_type")?.value,
           program_level: qs("#modal_program_level")?.value,
@@ -329,7 +383,7 @@ const DCLM_APP = (function () {
     if (pageSaveBtn) {
       pageSaveBtn.addEventListener("click", async () => {
         const success = await handleSaveSetup({
-          church_type: qs("#page_church_type")?.value,
+          church_type: qs("#page_church_type")?.value || assignedLocation?.church_type || "DCLM",
           program_domain: qs("#page_program_domain")?.value,
           program_type: qs("#page_program_type")?.value,
           program_level: qs("#page_program_level")?.value,
@@ -354,6 +408,7 @@ const DCLM_APP = (function () {
       if (qs("#modal_program_type")) qs("#modal_program_type").value = activeSetup.program_type || "";
       if (qs("#modal_program_level")) qs("#modal_program_level").value = activeSetup.program_level || "";
       if (qs("#modal_location_id")) qs("#modal_location_id").value = activeSetup.location_id || "";
+      if (qs("#modal_location_label")) qs("#modal_location_label").value = activeSetup.location_label || assignedLocation?.formatted_id || "";
       if (qs("#modal_service_date")) qs("#modal_service_date").value = activeSetup.service_date || todayISO();
       if (qs("#modal_event_id")) qs("#modal_event_id").value = activeSetup.event_id || "";
 
@@ -366,6 +421,7 @@ const DCLM_APP = (function () {
       if (qs("#page_program_type")) qs("#page_program_type").value = activeSetup.program_type || "";
       if (qs("#page_program_level")) qs("#page_program_level").value = activeSetup.program_level || "";
       if (qs("#page_location_id")) qs("#page_location_id").value = activeSetup.location_id || "";
+      if (qs("#page_location_label")) qs("#page_location_label").value = activeSetup.location_label || assignedLocation?.formatted_id || "";
       if (qs("#page_service_date")) qs("#page_service_date").value = activeSetup.service_date || todayISO();
       if (qs("#page_event_id")) qs("#page_event_id").value = activeSetup.event_id || "";
     } else {
@@ -527,7 +583,7 @@ const DCLM_APP = (function () {
         };
 
         await DCLM_DB.addToQueue("offerings_queue", item);
-        showToast(`Entry of ₦${amountValue.toLocaleString()} queued offline.`, "success");
+        showToast(`Entry of â‚¦${amountValue.toLocaleString()} queued offline.`, "success");
         haptic("success");
         if (amountInput) amountInput.value = "";
       });
@@ -666,7 +722,7 @@ const DCLM_APP = (function () {
         emptyEl.textContent = query
           ? "No workers match this search."
           : rosterState === "loading"
-            ? "Loading the approved worker roster…"
+            ? "Loading the approved worker rosterâ€¦"
             : rosterState === "error"
               ? "Roster unavailable. Check your connection and access, then refresh."
               : rosterState === "empty"
@@ -688,7 +744,7 @@ const DCLM_APP = (function () {
           </div>
           <div>
             <div class="fw-bold text-dark mb-0">${escapeHTML(worker.name)}</div>
-            <div class="small text-muted">${escapeHTML(worker.phone)} • ${escapeHTML(worker.unit || "General Worker")}</div>
+            <div class="small text-muted">${escapeHTML(worker.phone)} â€¢ ${escapeHTML(worker.unit || "General Worker")}</div>
           </div>
         </div>
         <button type="button" class="dclm-check-btn ${worker.marked_present || worker.attendance_submitted ? "is-checked" : ""}" ${worker.attendance_submitted ? "disabled" : ""} aria-label="${worker.attendance_submitted ? "Attendance submitted" : "Toggle attendance"}">
@@ -809,7 +865,9 @@ const DCLM_APP = (function () {
       });
     }
 
-    if (activeSetup && activeSetup.location_id && activeSetup.event_id) {
+    if (activeScreen === "fellowship") {
+      // Fellowship reports use their own authorized fellowship ID and date.
+    } else if (activeSetup && activeSetup.location_id && activeSetup.event_id) {
       fetchLocationRoster(activeSetup.location_id);
     }
   }
@@ -862,7 +920,7 @@ const DCLM_APP = (function () {
           return;
         }
         if (name.length > 120 || !/^\+?\d{7,15}$/.test(phone)) {
-          showToast("Use a name up to 120 characters and a phone number with 7–15 digits.", "warning");
+          showToast("Use a name up to 120 characters and a phone number with 7â€“15 digits.", "warning");
           haptic("warning");
           return;
         }
@@ -924,6 +982,87 @@ const DCLM_APP = (function () {
     }
   }
 
+  function initFellowshipBindings() {
+    const select = qs("#fellowship_id");
+    const today = todayISO();
+    for (const id of ["fellowship_attendance_date", "fellowship_offering_date"]) {
+      const input = qs(`#${id}`);
+      if (input && !input.value) input.value = today;
+    }
+    const show = (items) => {
+      assignedFellowships = items || [];
+      if (select) {
+        select.replaceChildren(new Option(items.length ? "Choose your house fellowship" : "No fellowship is assigned to this location", ""));
+        for (const fellowship of items) {
+          select.add(new Option(`${fellowship.name}${fellowship.code ? ` Â· ${fellowship.code}` : ""}`, fellowship.fellowship_id));
+        }
+      }
+      const wrap = qs("#fellowship-content-wrap");
+      if (wrap) wrap.classList.remove("d-none");
+      if (activeScreen === "fellowship" && qs("#identity-bar-title")) {
+        qs("#identity-bar-title").textContent = assignedLocation?.location_name || "Home Fellowship";
+      }
+    };
+    const load = async () => {
+      if (!navigator.onLine) {
+        const cached = await DCLM_DB.getFellowshipContext();
+        if (cached?.items?.length) {
+          assignedLocation = cached.location;
+          show(cached.items);
+          showToast("Offline: using the last authorized fellowship list saved on this account.", "warning");
+        }
+        else showToast("Connect once to load the assigned fellowship list.", "warning");
+        return;
+      }
+      try {
+        const response = await window.DCLM_AUTH.apiFetch("/api/fellowship-context");
+        const data = await response.json();
+        if (!response.ok || !data.ok) throw new Error(data.error || "Could not load fellowships.");
+        assignedLocation = data.location;
+        await DCLM_DB.saveFellowshipContext({ location: data.location, items: data.items || [] });
+        show(data.items || []);
+      } catch (error) { showToast(error.message, "warning"); }
+    };
+    load();
+
+    const selected = () => assignedFellowships.find((item) => item.fellowship_id === select?.value);
+    const save = async (store, extra) => {
+      const fellowship = selected();
+      if (!fellowship) { showToast("Choose an assigned house fellowship first.", "warning"); return; }
+      await DCLM_DB.addToQueue(store, {
+        client_id: generateUUID(), fellowship_id: fellowship.fellowship_id, fellowship_name: fellowship.name,
+        location_id: assignedLocation?.location_id || window.DCLM_CURRENT_USER?.location_id || "",
+        ...extra,
+      });
+      showToast("Saved on this device. Church_server has not confirmed it yet.", "success");
+      renderQueuesView();
+    };
+
+    qs("#btn-save-fellowship-attendance")?.addEventListener("click", async () => {
+      const values = Object.fromEntries(["men", "women", "youths", "children"].map((key) => [key, qs(`#fellowship_${key}`)?.value || "0"]));
+      if (Object.values(values).some((value) => !/^\d{1,6}$/.test(value))) { showToast("Attendance categories must be whole numbers from 0 to 999999.", "warning"); return; }
+      const date = qs("#fellowship_attendance_date")?.value;
+      if (!date) { showToast("Choose the meeting date.", "warning"); return; }
+      await save("fellowship_attendance_queue", { ...values, date, topic: qs("#fellowship_topic")?.value.trim() || null });
+    });
+    qs("#btn-save-fellowship-offering")?.addEventListener("click", async () => {
+      const amount = qs("#fellowship_offering_amount")?.value.trim() || "";
+      const date = qs("#fellowship_offering_date")?.value;
+      if (!/^\d{1,10}(?:\.\d{1,2})?$/.test(amount) || Number(amount) <= 0) { showToast("Enter a positive amount with up to two decimal places.", "warning"); return; }
+      if (!date) { showToast("Choose the meeting date.", "warning"); return; }
+      await save("fellowship_offerings_queue", { amount, date, note: qs("#fellowship_offering_note")?.value.trim() || null });
+      qs("#fellowship_offering_amount").value = "";
+    });
+    qs("#btn-save-fellowship-member")?.addEventListener("click", async () => {
+      const name = qs("#fellowship_member_name")?.value.trim() || "";
+      const phone = qs("#fellowship_member_phone")?.value.trim() || "";
+      if (!name || name.length > 120 || phone.length > 30) { showToast("Enter a member name up to 120 characters and a phone up to 30 characters.", "warning"); return; }
+      await save("fellowship_members_queue", { name, phone: phone || null });
+      qs("#fellowship_member_name").value = "";
+      qs("#fellowship_member_phone").value = "";
+    });
+  }
+
   // -------------------------------------------------------------
   // Queue & Sync View Manager
   // -------------------------------------------------------------
@@ -944,8 +1083,12 @@ const DCLM_APP = (function () {
     const offerings = await DCLM_DB.getAllFromQueue("offerings_queue");
     const attendance = await DCLM_DB.getAllFromQueue("attendance_queue");
     const registrations = await DCLM_DB.getAllFromQueue("registration_queue");
+    const fellowshipMembers = await DCLM_DB.getAllFromQueue("fellowship_members_queue");
+    const fellowshipAttendance = await DCLM_DB.getAllFromQueue("fellowship_attendance_queue");
+    const fellowshipOfferings = await DCLM_DB.getAllFromQueue("fellowship_offerings_queue");
 
-    const totalBatches = counts.length + offerings.length + (attendance.length > 0 ? 1 : 0) + registrations.length;
+    const totalBatches = counts.length + offerings.length + (attendance.length > 0 ? 1 : 0) + registrations.length
+      + fellowshipMembers.length + fellowshipAttendance.length + fellowshipOfferings.length;
     if (badgeEl) badgeEl.textContent = `${totalBatches} Pending`;
 
     if (totalBatches === 0) {
@@ -960,7 +1103,7 @@ const DCLM_APP = (function () {
           <div class="dclm-queue-item type-count">
             <div>
               <div class="fw-bold text-dark small"><i class="bi bi-people-fill text-primary me-1"></i> Population Count (${Number(item.total || 0).toLocaleString()} Souls)</div>
-              <div class="small text-muted">${escapeHTML(item.location_id)} • ${escapeHTML(item.service_date)}</div>
+              <div class="small text-muted">${escapeHTML(item.location_id)} â€¢ ${escapeHTML(item.service_date)}</div>
               ${item.last_error ? `<div class="small text-danger mt-1">Sync issue: ${escapeHTML(item.last_error)}</div>` : ""}
             </div>
           <button class="btn btn-sm btn-outline-danger rounded-pill px-3" data-discard-store="counts_queue" data-discard-id="${escapeHTML(item.client_id)}">Discard</button>
@@ -972,7 +1115,7 @@ const DCLM_APP = (function () {
         html += `
           <div class="dclm-queue-item type-offering">
             <div>
-              <div class="fw-bold text-dark small"><i class="bi bi-wallet2 text-success me-1"></i> Offering / Tithe (₦${Number(item.amount).toLocaleString()})</div>
+              <div class="fw-bold text-dark small"><i class="bi bi-wallet2 text-success me-1"></i> Offering / Tithe (â‚¦${Number(item.amount).toLocaleString()})</div>
               <div class="small text-muted">${escapeHTML(item.fund_type)} via ${escapeHTML(item.payment_method)}</div>
               ${item.last_error ? `<div class="small text-danger mt-1">Sync issue: ${escapeHTML(item.last_error)}</div>` : ""}
             </div>
@@ -999,13 +1142,27 @@ const DCLM_APP = (function () {
           <div class="dclm-queue-item type-register">
             <div>
               <div class="fw-bold text-dark small"><i class="bi bi-person-plus-fill text-warning me-1"></i> ${item.record_type === "convert" ? "Convert" : "Guest"}: ${escapeHTML(item.name)}</div>
-              <div class="small text-muted">${escapeHTML(item.phone)} • ${escapeHTML(item.details?.salvation_type || "Follow-up")}</div>
+              <div class="small text-muted">${escapeHTML(item.phone)} â€¢ ${escapeHTML(item.details?.salvation_type || "Follow-up")}</div>
               ${item.last_error ? `<div class="small text-danger mt-1">Sync issue: ${escapeHTML(item.last_error)}</div>` : ""}
             </div>
             <button class="btn btn-sm btn-outline-danger rounded-pill px-3" data-discard-store="registration_queue" data-discard-id="${escapeHTML(item.client_id)}">Discard</button>
           </div>
         `;
       });
+
+      const fellowshipQueues = [
+        [fellowshipAttendance, "Fellowship Attendance", "fellowship_attendance_queue"],
+        [fellowshipOfferings, "Fellowship Offering", "fellowship_offerings_queue"],
+        [fellowshipMembers, "Fellowship Member", "fellowship_members_queue"],
+      ];
+      for (const [items, label, store] of fellowshipQueues) {
+        items.forEach((item) => {
+          const detail = store === "fellowship_attendance_queue"
+            ? `${Number(item.men) + Number(item.women) + Number(item.youths) + Number(item.children)} people Â· ${item.date}`
+            : store === "fellowship_offerings_queue" ? `â‚¦${Number(item.amount).toLocaleString()} Â· ${item.date}` : escapeHTML(item.name);
+          html += `<div class="dclm-queue-item type-attendance"><div><div class="fw-bold text-dark small"><i class="bi bi-house-heart text-primary me-1"></i>${label}</div><div class="small text-muted">${escapeHTML(item.fellowship_name || "House Fellowship")} Â· ${detail}</div>${item.last_error ? `<div class="small text-danger mt-1">Sync issue: ${escapeHTML(item.last_error)}</div>` : ""}</div><button class="btn btn-sm btn-outline-danger rounded-pill px-3" data-discard-store="${store}" data-discard-id="${escapeHTML(item.client_id)}">Discard</button></div>`;
+        });
+      }
 
       listEl.innerHTML = html;
     }
@@ -1024,7 +1181,7 @@ const DCLM_APP = (function () {
           <div class="d-flex justify-content-between align-items-center p-2 mb-2 bg-white rounded-3 border">
             <div>
               <div class="fw-bold text-dark small">${escapeHTML(r.type || "Batch Record")}</div>
-              <div class="text-muted" style="font-size: 0.75rem;">${new Date(r.synced_at).toLocaleTimeString()} • ${r.location_id || "Church"}</div>
+              <div class="text-muted" style="font-size: 0.75rem;">${new Date(r.synced_at).toLocaleTimeString()} â€¢ ${r.location_id || "Church"}</div>
             </div>
             <span class="badge bg-success text-white rounded-pill px-2 py-1 small">Synced</span>
           </div>
@@ -1084,7 +1241,8 @@ const DCLM_APP = (function () {
       clearAllBtn.addEventListener("click", async () => {
         if (confirm("Delete this account's setup, cached roster, recent history, and all pending records from this device? Pending records cannot be recovered after deletion.")) {
           const stores = ["active_setup", "worker_roster", "counts_queue", "offerings_queue",
-                          "attendance_queue", "registration_queue", "recent_submissions", "count_draft",
+                          "attendance_queue", "registration_queue", "fellowship_members_queue", "fellowship_attendance_queue",
+                          "fellowship_offerings_queue", "recent_submissions", "count_draft",
                           "attendance_confirmed"];
           for (const store of stores) {
             await DCLM_DB.clearQueue(store);
@@ -1130,6 +1288,8 @@ const DCLM_APP = (function () {
       }
     } else if (activeScreen === "registration") {
       initRegistrationBindings();
+    } else if (activeScreen === "fellowship") {
+      initFellowshipBindings();
     } else if (activeScreen === "queues") {
       initQueuesBindings();
     } else if (activeScreen === "settings") {

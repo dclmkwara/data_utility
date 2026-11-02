@@ -5,9 +5,26 @@ const DCLM_SYNC = (function () {
     ["offerings_queue", "offerings", "Offering"],
     ["registration_queue", "records", "Registration"],
     ["attendance_queue", "worker_attendance", "Attendance"],
+    ["fellowship_members_queue", "fellowship_members", "Fellowship Member"],
+    ["fellowship_attendance_queue", "fellowship_attendance", "Fellowship Attendance"],
+    ["fellowship_offerings_queue", "fellowship_offerings", "Fellowship Offering"],
   ];
 
   function payloadFor(group, item) {
+    if (group.field === "fellowship_members") return {
+      client_id: item.client_id, fellowship_id: item.fellowship_id,
+      name: item.name, phone: item.phone || null, role: "member",
+    };
+    if (group.field === "fellowship_attendance") return {
+      client_id: item.client_id, fellowship_id: item.fellowship_id,
+      date: item.date, men: Number(item.men || 0), women: Number(item.women || 0),
+      youths: Number(item.youths || 0), children: Number(item.children || 0),
+      topic: item.topic || null, note: item.note || null,
+    };
+    if (group.field === "fellowship_offerings") return {
+      client_id: item.client_id, fellowship_id: item.fellowship_id,
+      date: item.date, amount: String(item.amount), note: item.note || null,
+    };
     if (group.field === "counts") return {
       client_id: item.client_id, event_id: item.event_id, location_id: item.location_id,
       assignment_id: item.assignment_id || null,
@@ -51,16 +68,21 @@ const DCLM_SYNC = (function () {
     const eligible = [];
     let failed = 0;
     for (const entry of entries) {
-      if (!entry.item.client_id || !entry.item.location_id || !entry.item.event_id) {
+      const fellowshipEntry = entry.group.field.startsWith("fellowship_");
+      if (!entry.item.client_id || (fellowshipEntry
+        ? !entry.item.fellowship_id
+        : (!entry.item.location_id || !entry.item.event_id))) {
         failed += 1;
         await DCLM_DB.addToQueue(entry.group.store, {
           ...entry.item,
-          last_error: "Select a valid event and location before syncing this record.",
+          last_error: fellowshipEntry
+            ? "Select an authorized fellowship before syncing this record."
+            : "Select a valid event and location before syncing this record.",
         });
       } else eligible.push(entry);
     }
     if (!eligible.length) {
-      DCLM_APP.showToast(`${failed} record(s) need a valid event and location before they can sync.`, "warning");
+      DCLM_APP.showToast(`${failed} record(s) need a valid event, location, or fellowship before they can sync.`, "warning");
       return { ok: false, synced: 0, failed };
     }
 
@@ -82,7 +104,9 @@ const DCLM_SYNC = (function () {
       DCLM_APP.showToast(`Sending ${Math.min(offset + chunk.length, eligible.length)} of ${eligible.length} records…`, "info");
       let response;
       let result;
+      let requestPayload;
       try {
+        requestPayload = payload;
         response = await window.DCLM_AUTH.apiFetch("/api/sync", {
           method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
         });
@@ -101,6 +125,9 @@ const DCLM_SYNC = (function () {
 
       const now = new Date().toISOString();
       for (const { group, item } of chunk) {
+        const attemptedItem = attempted.find((entry) =>
+          entry.group.store === group.store && String(entry.item.client_id) === String(item.client_id)
+        )?.item || item;
         const details = result[group.field]?.details;
         const outcome = Array.isArray(details)
           ? details.find((row) => String(row.client_id) === String(item.client_id))
@@ -119,7 +146,7 @@ const DCLM_SYNC = (function () {
         } else {
           failed += 1;
           const message = String(outcome?.error || "Church_server did not confirm this record.").slice(0, 300);
-          await DCLM_DB.addToQueue(group.store, { ...item, status: "pending", last_error: message });
+          await DCLM_DB.addToQueue(group.store, { ...attemptedItem, status: "pending", last_error: message });
         }
       }
       await DCLM_DB.pruneRecentSubmissions();

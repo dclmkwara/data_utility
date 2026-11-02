@@ -13,6 +13,7 @@ from .routes.auth import setup_auth_routes
 from .routes.attendance import setup_attendance_routes
 from .routes.counter import setup_counter_routes
 from .routes.home import setup_home_routes
+from .routes.fellowship import setup_fellowship_routes
 from .routes.information import setup_information_routes
 from .routes.queues import setup_queue_routes
 from .routes.registration import setup_registration_routes
@@ -56,11 +57,11 @@ def create_app() -> FastHTML:
         Meta(name="theme-color", content="#0f2752"),
         Link(rel="manifest", href="/assets/manifest.json"),
         Link(rel="stylesheet", href="/assets/css/utility.css?v=7"),
-        Script(src="/assets/js/db.js?v=6", defer=True),
+        Script(src="/assets/js/db.js?v=8", defer=True),
         Script(src="/assets/js/auth.js?v=3", defer=True),
         Script(src="/assets/js/haptics.js?v=3", defer=True),
-        Script(src="/assets/js/sync.js?v=5", defer=True),
-        Script(src="/assets/js/app.js?v=7", defer=True),
+        Script(src="/assets/js/sync.js?v=7", defer=True),
+        Script(src="/assets/js/app.js?v=10", defer=True),
         Script(sw_registration),
     ]
 
@@ -70,6 +71,7 @@ def create_app() -> FastHTML:
     setup_counter_routes(app)
     setup_attendance_routes(app)
     setup_registration_routes(app)
+    setup_fellowship_routes(app)
     setup_setup_routes(app)
     setup_queue_routes(app)
     setup_information_routes(app)
