@@ -134,7 +134,7 @@ body[data-auth-state="checking"] .dclm-mobile-frame { visibility: hidden; }
 .dclm-identity-bar > div,
 .dclm-identity-bar > div > div:first-child { min-width: 0; }
 .dclm-identity-bar > div > div:first-child { flex: 1 1 auto; }
-.dclm-identity-bar > div > div:first-child { flex-wrap: wrap; }
+.dclm-identity-bar > div > div:first-child { flex-wrap: nowrap; }
 .dclm-identity-bar > div > div:first-child > div:last-child { min-width: 0; flex: 1 1 auto; }
 .dclm-identity-bar #identity-bar-btn { flex: 0 0 auto; }
 .dclm-identity-bar .dclm-identity-val,
@@ -146,6 +146,8 @@ body[data-auth-state="checking"] .dclm-mobile-frame { visibility: hidden; }
 }
 .dclm-identity-bar .dclm-identity-val,
 .dclm-identity-bar .dclm-identity-label { overflow-wrap: anywhere; white-space: normal; }
+.dclm-identity-bar > div { flex-wrap: nowrap; }
+.dclm-identity-bar .dclm-identity-logo { width: 34px; height: 34px; flex: 0 0 34px; object-fit: contain; border-radius: 50%; }
 
 .dclm-identity-bar:active {
   transform: scale(0.98);
@@ -693,9 +695,9 @@ body[data-auth-state="checking"] .dclm-mobile-frame { visibility: hidden; }
   border-radius: var(--dclm-radius-md);
   padding: 0.85rem 1rem;
   margin-bottom: 0.65rem;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-items: start;
   gap: 0.65rem;
   box-shadow: var(--dclm-shadow-sm);
 }
@@ -704,9 +706,13 @@ body[data-auth-state="checking"] .dclm-mobile-frame { visibility: hidden; }
 .dclm-queue-item.type-offering   { border-left-color: var(--dclm-success); }
 .dclm-queue-item.type-attendance { border-left-color: #0ea5e9; }
 .dclm-queue-item.type-register   { border-left-color: #f59e0b; }
-.dclm-queue-item > div:first-child { min-width: 0; flex: 1 1 auto; overflow-wrap: anywhere; }
+.dclm-queue-item > div:first-child { display: contents; min-width: 0; overflow-wrap: anywhere; }
+.dclm-queue-item .fw-bold { min-width: 0; overflow-wrap: anywhere; }
+.dclm-queue-item .small.text-muted { min-width: 0; overflow-wrap: anywhere; }
 .dclm-queue-item button { flex: 0 0 auto; }
-.dclm-queue-item .text-danger { overflow-wrap: anywhere; word-break: break-word; white-space: normal; }
+.dclm-queue-item .text-danger { grid-column: 1; min-width: 0; overflow-wrap: anywhere; word-break: break-word; white-space: normal; }
+.dclm-queue-item > button,
+.dclm-queue-item > .d-flex { grid-column: 1; justify-self: end; display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 0.45rem; max-width: 100%; }
 
 /* ── Setup Guard Shield ── */
 .dclm-shield-card {

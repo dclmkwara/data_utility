@@ -14,6 +14,7 @@ const DCLM_APP = (function () {
   let cachedRoster = [];
   let rosterState = "not_loaded";
   let hapticsFailureNotified = false;
+  let confirmResolver = null;
 
   // Local counter tally state
   let counterState = {
@@ -115,7 +116,13 @@ const DCLM_APP = (function () {
   function safeUiText(value) {
     let text = String(value ?? "");
     const extractMessage = (payload) => {
-      if (typeof payload === "string") return payload;
+      if (typeof payload === "string") {
+        const nestedStart = payload.search(/[\[{]/);
+        if (nestedStart >= 0) {
+          try { return extractMessage(JSON.parse(payload.slice(nestedStart))); } catch (_) { /* keep plain text */ }
+        }
+        return payload;
+      }
       if (Array.isArray(payload)) return payload.map(extractMessage).filter(Boolean).join("; ");
       if (payload && typeof payload === "object") {
         for (const key of ["detail", "message", "msg", "error", "reason"]) {
@@ -125,11 +132,21 @@ const DCLM_APP = (function () {
       return "The record could not be submitted. Please try again.";
     };
     const jsonStart = text.search(/[\[{]/);
-    if (jsonStart >= 0 && (text.trimStart().startsWith("{") || text.trimStart().startsWith("["))) {
+    if (jsonStart >= 0) {
       try {
-        text = extractMessage(JSON.parse(text));
+        const parsed = JSON.parse(text.slice(jsonStart));
+        const details = parsed?.detail;
+        const first = Array.isArray(details) ? details[0] : details;
+        const location = Array.isArray(first?.loc) ? first.loc.join(".") : "";
+        if (location.includes("worker_attendance") && location.endsWith("status")) {
+          text = "Worker attendance was rejected because its status was invalid. The record is still saved; sync it again after reloading the app.";
+        } else {
+          text = extractMessage(parsed);
+        }
       } catch (_) {
-        text = text.replace(/^\s*[\[{].*[\]}]\s*$/, "The record could not be submitted. Please try again.");
+        if (text.trimStart().startsWith("{") || text.trimStart().startsWith("[")) {
+          text = "The record could not be submitted. Please try again.";
+        }
       }
     }
     if (text === "[object Object]") text = "The request could not be completed. Please try again.";
@@ -169,6 +186,36 @@ const DCLM_APP = (function () {
     container._timer = setTimeout(() => {
       container.classList.remove("is-visible");
     }, 3200);
+  }
+
+  function confirm(message, { title = "Please confirm", confirmLabel = "Continue", danger = false } = {}) {
+    const modalEl = qs("#dclmConfirmModal");
+    if (!modalEl || typeof bootstrap === "undefined") {
+      showToast("The confirmation dialog is unavailable. Reload the page and try again.", "warning");
+      return Promise.resolve(false);
+    }
+    qs("#dclm-confirm-message").textContent = safeUiText(message);
+    modalEl.querySelector(".modal-title").textContent = title;
+    const accept = qs("#dclm-confirm-accept");
+    accept.textContent = confirmLabel;
+    accept.className = `btn ${danger ? "btn-danger" : "btn-primary"} rounded-pill px-4 fw-semibold`;
+    const modal = bootstrap.Modal.getOrCreateInstance(modalEl);
+    return new Promise((resolve) => {
+      if (confirmResolver) confirmResolver(false);
+      let settled = false;
+      const finish = (value) => {
+        if (settled) return;
+        settled = true;
+        confirmResolver = null;
+        modalEl.removeEventListener("hidden.bs.modal", onHidden);
+        resolve(value);
+      };
+      const onHidden = () => finish(false);
+      confirmResolver = (value) => finish(value);
+      modalEl.addEventListener("hidden.bs.modal", onHidden, { once: true });
+      accept.onclick = () => { finish(true); modal.hide(); };
+      modal.show();
+    });
   }
 
   async function refreshHomeQueueSummary() {
@@ -220,11 +267,11 @@ const DCLM_APP = (function () {
         barEl.className = "dclm-identity-bar is-active";
       }
       if (iconEl) {
-        iconEl.className = "bi bi-shield-check fs-5 me-2 text-primary";
+        iconEl.className = "dclm-identity-logo me-2";
       }
       const locationLabel = displayLocationId(activeSetup.assigned_location_id || activeSetup.location_id);
       if (titleEl) titleEl.textContent = safeUiText(activeSetup.event_title || activeSetup.program_type || "Church program");
-      if (subEl) subEl.textContent = `${locationLabel} · ${activeSetup.service_date}`;
+      if (subEl) subEl.textContent = locationLabel;
       if (btnEl) btnEl.textContent = "Change";
       if (shieldEl) shieldEl.classList.add("d-none");
       // Show all content wraps now that setup is active
@@ -235,7 +282,7 @@ const DCLM_APP = (function () {
         barEl.className = "dclm-identity-bar is-missing";
       }
       if (iconEl) {
-        iconEl.className = "bi bi-exclamation-triangle fs-5 me-2 text-warning";
+        iconEl.className = "dclm-identity-logo me-2";
       }
       if (titleEl) titleEl.textContent = "Program Setup Required";
       if (subEl) subEl.textContent = "Tap to set Church Wing, Program, Level, Location & Date";
@@ -602,11 +649,10 @@ const DCLM_APP = (function () {
 
         const category = tile.dataset.category;
         if (category && counterState[category] !== undefined) {
+          const nextTotal = Object.values(counterState).reduce((a, b) => a + b, 0) + 1;
+          haptic(nextTotal % 50 === 0 ? "milestone" : "tick");
           counterState[category] += 1;
           updateCounterDisplays();
-          const grandTotal = Object.values(counterState).reduce((a, b) => a + b, 0);
-          if (grandTotal > 0 && grandTotal % 50 === 0) haptic("milestone");
-          else haptic("tick");
           await persistCountDraft();
 
           // Brief visual pulse on the tile number
@@ -624,7 +670,7 @@ const DCLM_APP = (function () {
     const resetBtn = qs("#btn-reset-counter");
     if (resetBtn) {
       resetBtn.addEventListener("click", async () => {
-        if (confirm("Reset all population tallies to zero?")) {
+        if (await confirm("Reset all population tallies to zero?", { title: "Reset population count", confirmLabel: "Reset", danger: true })) {
           Object.keys(counterState).forEach((k) => { counterState[k] = 0; });
           await DCLM_DB.clearCountDraft();
           updateCounterDisplays();
@@ -979,6 +1025,7 @@ const DCLM_APP = (function () {
       program_type: activeSetup.program_type,
       service_date: activeSetup.service_date,
       worker_id: worker.worker_id,
+      worker_name: worker.name || "Church Worker",
       status: "present",
       recorded_at: new Date().toISOString(),
     }));
@@ -986,7 +1033,7 @@ const DCLM_APP = (function () {
       showToast("These workers already have attendance records queued or confirmed for this event.", "info");
       return;
     }
-    if (navigator.onLine && !window.confirm("Editing attendance after submission requires elevated approval. Submit the marked attendance now?")) return;
+    if (navigator.onLine && !(await confirm("Editing attendance after submission requires elevated approval. Submit the marked attendance now?", { title: "Submit workers attendance", confirmLabel: "Submit" }))) return;
 
     const submission = await DCLM_SYNC.submitManyOrQueue("attendance_queue", attendanceItems, { skipEditWarning: true });
     const queuedWorkers = await DCLM_DB.getAttendancePendingWorkerIds(contextKey);
@@ -1002,7 +1049,18 @@ const DCLM_APP = (function () {
     renderWorkerRoster();
     await renderAttendanceReview();
     haptic("success");
-    showToast(submission.queued ? "Attendance saved on this device and queued for sync." : "Attendance submitted successfully. You can start a fresh attendance count.", submission.queued ? "warning" : "success");
+    if (submission.submitted > 0 && submission.queued === 0) {
+      await DCLM_DB.clearAttendanceMarks(eventContextKey());
+      await DCLM_DB.clearQueue("worker_roster");
+      await DCLM_DB.clearActiveSetup();
+      cachedRoster = [];
+      await refreshActiveSetup();
+      updateAttendanceSetupGate();
+      showToast("Attendance submitted. Setup and marked data were cleared for the next session.", "success");
+    } else {
+      showToast(submission.queued ? "Attendance saved on this device and queued for sync. Setup stays available until server confirmation." : "Attendance submitted successfully.", submission.queued ? "warning" : "success");
+    }
+    await renderAttendanceReview();
   }
 
   function updateAttendanceSetupGate() {
@@ -1276,7 +1334,7 @@ const DCLM_APP = (function () {
     const fellowshipAttendance = await DCLM_DB.getAllFromQueue("fellowship_attendance_queue");
     const fellowshipOfferings = await DCLM_DB.getAllFromQueue("fellowship_offerings_queue");
 
-    const totalBatches = counts.length + offerings.length + (attendance.length > 0 ? 1 : 0) + registrations.length
+    const totalBatches = counts.length + offerings.length + attendance.length + registrations.length
       + fellowshipMembers.length + fellowshipAttendance.length + fellowshipOfferings.length;
     if (badgeEl) badgeEl.textContent = `${totalBatches} Pending`;
 
@@ -1316,18 +1374,18 @@ const DCLM_APP = (function () {
         `;
       });
 
-      if (attendance.length > 0) {
+      attendance.forEach((item) => {
         html += `
           <div class="dclm-queue-item type-attendance">
             <div>
-              <div class="fw-bold text-dark small"><i class="bi bi-person-check-fill text-info me-1"></i> Workers Attendance (${attendance.length} Workers)</div>
-              <div class="small text-muted">Awaiting cloud confirmation</div>
-              ${attendance.some((item) => item.last_error) ? `<div class="small text-danger mt-1">${attendance.filter((item) => item.last_error).length} attendance record(s) need attention; they remain saved.</div>` : ""}
+              <div class="fw-bold text-dark small"><i class="bi bi-person-check-fill text-info me-1"></i> Worker Attendance · ${escapeHTML(item.worker_name || "Worker")}</div>
+              <div class="small text-muted">${escapeHTML(item.program_type || "Workers Meeting")} · ${escapeHTML(item.service_date || "Date unavailable")}</div>
+              ${item.last_error ? `<div class="small text-danger mt-1">Sync issue: ${escapeHTML(item.last_error)}</div>` : ""}
             </div>
-            <button class="btn btn-sm btn-outline-danger rounded-pill px-3" data-discard-attendance>Discard</button>
+            <div class="d-flex gap-2"><button class="btn btn-sm btn-primary rounded-pill px-3" data-sync-store="attendance_queue" data-sync-id="${escapeHTML(item.client_id)}">Sync</button><button class="btn btn-sm btn-outline-danger rounded-pill px-3" data-discard-store="attendance_queue" data-discard-id="${escapeHTML(item.client_id)}">Discard</button></div>
           </div>
         `;
-      }
+      });
 
       registrations.forEach((item) => {
         html += `
@@ -1357,6 +1415,25 @@ const DCLM_APP = (function () {
       }
 
       listEl.innerHTML = html;
+      listEl.querySelectorAll("[data-discard-store]").forEach((discardButton) => {
+        const card = discardButton.closest(".dclm-queue-item");
+        if (!card || card.querySelector("[data-sync-store]")) return;
+        let actions = discardButton.parentElement?.parentElement === card && discardButton.parentElement.classList.contains("d-flex")
+          ? discardButton.parentElement : null;
+        if (!actions) {
+          actions = document.createElement("div");
+          actions.className = "d-flex gap-2";
+          card.querySelectorAll(":scope > button").forEach((button) => actions.appendChild(button));
+          card.appendChild(actions);
+        }
+        const syncButton = document.createElement("button");
+        syncButton.type = "button";
+        syncButton.className = "btn btn-sm btn-primary rounded-pill px-3";
+        syncButton.textContent = "Sync";
+        syncButton.dataset.syncStore = discardButton.dataset.discardStore;
+        syncButton.dataset.syncId = discardButton.dataset.discardId;
+        discardButton.before(syncButton);
+      });
     }
 
     // Render Recent Synced History
@@ -1386,6 +1463,15 @@ const DCLM_APP = (function () {
     const listEl = qs("#pending-queue-list");
     let editingCount = null;
     listEl?.addEventListener("click", (event) => {
+      const syncButton = event.target.closest("[data-sync-store]");
+      if (syncButton) {
+        const button = syncButton;
+        button.disabled = true;
+        button.textContent = "Syncing…";
+        DCLM_SYNC.syncQueueItem(button.dataset.syncStore, button.dataset.syncId)
+          .finally(() => renderQueuesView());
+        return;
+      }
       const editCount = event.target.closest("[data-edit-count-id]");
       if (editCount) {
         DCLM_DB.getAllFromQueue("counts_queue").then((items) => {
@@ -1439,7 +1525,7 @@ const DCLM_APP = (function () {
 
     qs("#btn-claim-legacy-queues")?.addEventListener("click", async () => {
       const count = await DCLM_DB.getUnassignedQueueCount();
-      if (!count || !confirm(`Assign ${count} older saved record(s) to ${window.DCLM_CURRENT_USER?.name || "your account"}?`)) return;
+      if (!count || !(await confirm(`Assign ${count} older saved record(s) to ${window.DCLM_CURRENT_USER?.name || "your account"}?`, { title: "Claim older records", confirmLabel: "Claim" }))) return;
       const claimed = await DCLM_DB.claimUnassignedQueueItems();
       showToast(`${claimed} older record(s) assigned to your account.`, "success");
       await renderQueuesView();
@@ -1498,7 +1584,7 @@ const DCLM_APP = (function () {
     const clearRosterBtn = qs("#btn-clear-roster-cache");
     if (clearRosterBtn) {
       clearRosterBtn.addEventListener("click", async () => {
-        if (confirm("Clear the cached worker roster? It will be re-fetched on next attendance session.")) {
+        if (await confirm("Clear the cached worker roster? It will be re-fetched on next attendance session.", { title: "Clear worker roster", confirmLabel: "Clear", danger: true })) {
           await DCLM_DB.clearQueue("worker_roster");
           showToast("Worker roster cache cleared.", "success");
           haptic("success");
@@ -1510,7 +1596,7 @@ const DCLM_APP = (function () {
     const clearAllBtn = qs("#btn-clear-all-data");
     if (clearAllBtn) {
       clearAllBtn.addEventListener("click", async () => {
-        if (confirm("Delete this account's setup, cached roster, recent history, and all pending records from this device? Pending records cannot be recovered after deletion.")) {
+        if (await confirm("Delete this account's setup, cached roster, recent history, and all pending records from this device? Pending records cannot be recovered after deletion.", { title: "Clear saved device data", confirmLabel: "Delete all", danger: true })) {
           const stores = ["active_setup", "worker_roster", "app_settings", "counts_queue", "offerings_queue",
                           "attendance_queue", "registration_queue", "fellowship_members_queue", "fellowship_attendance_queue",
                           "fellowship_offerings_queue", "recent_submissions", "count_draft",
@@ -1572,11 +1658,24 @@ const DCLM_APP = (function () {
 
   return {
     showToast,
+    confirm,
+    async onAttendanceSyncConfirmed(contextKey) {
+      const remaining = await DCLM_DB.getAttendancePendingWorkerIds(contextKey);
+      if (remaining.size) return;
+      await DCLM_DB.clearAttendanceMarks(contextKey);
+      await DCLM_DB.clearQueue("worker_roster");
+      if (eventContextKey() === String(contextKey || "")) {
+        await DCLM_DB.clearActiveSetup();
+        activeSetup = null;
+        await refreshActiveSetup();
+        updateAttendanceSetupGate();
+      }
+    },
     refreshActiveSetup,
     refreshHomeQueueSummary,
     renderQueuesView,
     async discardQueueItem(storeName, key) {
-      if (confirm("Discard this unsubmitted item?")) {
+      if (await confirm("Discard this unsubmitted item?", { title: "Discard saved record", confirmLabel: "Discard", danger: true })) {
         await DCLM_DB.removeFromQueue(storeName, key);
         renderQueuesView();
         await refreshHomeQueueSummary();
@@ -1584,7 +1683,7 @@ const DCLM_APP = (function () {
       }
     },
     async discardAllAttendance() {
-      if (confirm("Discard all unsubmitted attendance records?")) {
+      if (await confirm("Discard all unsubmitted attendance records?", { title: "Discard attendance records", confirmLabel: "Discard all", danger: true })) {
         await DCLM_DB.clearQueue("attendance_queue");
         renderQueuesView();
         await refreshHomeQueueSummary();

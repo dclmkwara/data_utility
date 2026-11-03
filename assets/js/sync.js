@@ -40,17 +40,17 @@ const DCLM_SYNC = (function () {
     await DCLM_DB.pruneRecentSubmissions();
   }
 
-  async function submitOrQueue(store, item, { skipEditWarning = false } = {}) {
-    const result = await submitManyOrQueue(store, [item], { skipEditWarning });
+  async function submitOrQueue(store, item, { skipEditWarning = false, forceImmediate = false } = {}) {
+    const result = await submitManyOrQueue(store, [item], { skipEditWarning, forceImmediate });
     return { ...result, queued: result.queued > 0, submitted: result.submitted > 0 };
   }
 
-  async function submitManyOrQueue(store, items, { skipEditWarning = false } = {}) {
+  async function submitManyOrQueue(store, items, { skipEditWarning = false, forceImmediate = false } = {}) {
     const group = groupForStore(store);
     if (!group) throw new Error("Unsupported field record type.");
     if (!items.length) return { ok: true, submitted: 0, queued: 0 };
     const mode = await DCLM_DB.getSubmissionMode();
-    if (mode === "queue_first" || !navigator.onLine) {
+    if ((!forceImmediate && mode === "queue_first") || !navigator.onLine) {
       for (const item of items) await DCLM_DB.addToQueue(store, { ...item, last_error: null });
       await DCLM_APP.refreshHomeQueueSummary();
       await DCLM_APP.renderQueuesView();
@@ -60,7 +60,7 @@ const DCLM_SYNC = (function () {
       return { ok: true, submitted: 0, queued: items.length };
     }
     if (!skipEditWarning && ["offerings_queue", "attendance_queue", "fellowship_attendance_queue", "fellowship_offerings_queue"].includes(store)
-      && !window.confirm("Editing this record after submission requires elevated approval. Submit this record now?")) {
+      && !(await window.DCLM_APP.confirm("Editing this record after submission requires elevated approval. Submit this record now?", { title: "Confirm submission", confirmLabel: "Submit" }))) {
       return { ok: false, cancelled: true, submitted: 0, queued: 0 };
     }
     try {
@@ -72,12 +72,16 @@ const DCLM_SYNC = (function () {
         const detail = resultById.get(String(item.client_id));
         if (detail && ["synced", "duplicate"].includes(detail.status)) {
           await rememberConfirmed(group, item, detail.status);
+          await DCLM_DB.removeFromQueue(store, item.client_id);
           submitted += 1;
         } else {
           const error = detail?.error || "The records service did not confirm this submission.";
           await DCLM_DB.addToQueue(store, { ...item, last_error: error });
           queued += 1;
         }
+      }
+      if (group.field === "worker_attendance" && submitted > 0 && queued === 0) {
+        await window.DCLM_APP.onAttendanceSyncConfirmed(items[0].context_key || items[0].event_id);
       }
       await DCLM_APP.refreshHomeQueueSummary();
       await DCLM_APP.renderQueuesView();
@@ -138,7 +142,11 @@ const DCLM_SYNC = (function () {
       client_id: item.client_id, event_id: item.event_id || null, location_id: item.location_id,
       date: `${item.service_date}T00:00:00Z`, church_type: item.church_type,
       program_domain: item.program_domain, program_type: item.program_type,
-      worker_id: item.worker_id, status: item.status || "present", reason: item.reason || null,
+      worker_id: item.worker_id,
+      // Queue lifecycle values (pending/syncing) are never valid attendance statuses.
+      status: ["present", "absent", "late", "excused"].includes(String(item.attendance_status || item.status || "").toLowerCase())
+        ? String(item.attendance_status || item.status).toLowerCase() : "present",
+      reason: item.reason || null,
       note: item.note || null,
     };
   }
@@ -157,7 +165,7 @@ const DCLM_SYNC = (function () {
       return { ok: true, synced: 0 };
     }
     const needsEditNotice = entries.some(({ group }) => ["offerings", "worker_attendance", "fellowship_attendance", "fellowship_offerings"].includes(group.field));
-    if (needsEditNotice && !window.confirm("Some offering and attendance records are included. Editing them after submission requires elevated approval. Continue with submission?")) {
+    if (needsEditNotice && !(await window.DCLM_APP.confirm("Some offering and attendance records are included. Editing them after submission requires elevated approval. Continue with submission?", { title: "Confirm submission", confirmLabel: "Submit all" }))) {
       return { ok: false, cancelled: true };
     }
 
@@ -186,6 +194,7 @@ const DCLM_SYNC = (function () {
 
     let synced = 0;
     let networkError = null;
+    const confirmedAttendanceContexts = new Set();
     for (let offset = 0; offset < eligible.length; offset += 500) {
       const chunk = eligible.slice(offset, offset + 500);
       const payload = Object.fromEntries(QUEUES.map(([, field]) => [field, []]));
@@ -240,6 +249,7 @@ const DCLM_SYNC = (function () {
             event_id: item.event_id, context_key: item.context_key || null, worker_id: item.worker_id || null,
           });
           await DCLM_DB.removeFromQueue(group.store, item.client_id);
+          if (group.field === "worker_attendance") confirmedAttendanceContexts.add(item.context_key || item.event_id);
           synced += 1;
         } else {
           failed += 1;
@@ -252,6 +262,9 @@ const DCLM_SYNC = (function () {
 
     if (typeof DCLM_APP.renderQueuesView === "function") await DCLM_APP.renderQueuesView();
     if (typeof DCLM_APP.refreshHomeQueueSummary === "function") await DCLM_APP.refreshHomeQueueSummary();
+    for (const contextKey of confirmedAttendanceContexts) {
+      await DCLM_APP.onAttendanceSyncConfirmed(contextKey);
+    }
     if (networkError) {
       DCLM_APP.showToast(`${synced} confirmed; remaining records are still saved. Sync stopped: ${networkError}`, "warning");
       return { ok: false, synced, failed, error: networkError };
@@ -261,5 +274,16 @@ const DCLM_SYNC = (function () {
     return { ok: failed === 0, synced, failed };
   }
 
-  return { syncAllQueues, submitOrQueue, submitManyOrQueue };
+  async function syncQueueItem(store, clientId) {
+    const item = (await DCLM_DB.getAllFromQueue(store)).find((row) => String(row.client_id) === String(clientId));
+    if (!item) return { ok: false, missing: true };
+    if (!navigator.onLine) {
+      DCLM_APP.showToast("Device is offline. This record remains saved on this device.", "warning");
+      return { ok: false, offline: true };
+    }
+    const result = await submitManyOrQueue(store, [item], { forceImmediate: true });
+    return result;
+  }
+
+  return { syncAllQueues, syncQueueItem, submitOrQueue, submitManyOrQueue };
 })();

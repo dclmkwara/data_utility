@@ -135,6 +135,26 @@ const DCLM_DB = (function () {
       });
     },
 
+    async clearActiveSetup() {
+      const ownerId = currentOwnerId();
+      if (!ownerId) return;
+      return performTx("active_setup", "readwrite", (store) => reqToPromise(store.delete(`active_identity:${ownerId}`)));
+    },
+
+    async clearAttendanceMarks(eventId) {
+      const ownerId = currentOwnerId();
+      if (!ownerId) return;
+      return performTx("worker_roster", "readwrite", async (store) => {
+        const workers = await reqToPromise(store.getAll());
+        for (const worker of workers) {
+          if (worker.owner_id !== ownerId || (eventId && worker.marked_event_id !== eventId)) continue;
+          worker.marked_event_id = null;
+          worker.marked_at = null;
+          store.put(worker);
+        }
+      });
+    },
+
     // Worker Roster Store
     async getWorkerRoster(locationId = "", eventId = "") {
       const ownerId = currentOwnerId();

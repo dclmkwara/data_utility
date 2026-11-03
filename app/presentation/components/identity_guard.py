@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from typing import Any
-from fasthtml.common import A, Button, Div, I, P, Small, Span
+from fasthtml.common import A, Button, Div, I, Img, P, Small, Span
 from faststrap import Card, Fx
 
 
@@ -12,7 +12,7 @@ def identity_bar(active_setup: dict[str, Any] | None = None) -> Any:
     return Div(
         Div(
             Div(
-                I(cls="bi bi-shield-check fs-5 me-2", id="identity-bar-icon"),
+                Img(src="/assets/icon-192.png", alt="Deeper Life Bible Church", cls="dclm-identity-logo me-2", id="identity-bar-icon"),
                 Div(
                     Span("Program Setup Required", id="identity-bar-title", cls="dclm-identity-val d-block"),
                     Small("Tap to set Church Wing, Program, Level, Location & Date",

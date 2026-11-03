@@ -3,8 +3,8 @@ from __future__ import annotations
 
 import json
 from typing import Any
-from fasthtml.common import A, Body, Div, H1, Header, I, Main, Nav, P, Script, Small, Span, Title
-from faststrap import BottomNav, BottomNavItem, Container
+from fasthtml.common import A, Body, Button, Div, H1, Header, I, Main, Nav, P, Script, Small, Span, Title
+from faststrap import BottomNav, BottomNavItem, Container, Modal
 
 from ...core.config import APP_NAME
 from ...core.constants import PROGRAM_TYPES_BY_DOMAIN
@@ -70,6 +70,19 @@ def bottom_nav_bar(active_screen: str) -> Any:
     )
 
 
+def confirmation_modal() -> Any:
+    return Modal(
+        Div(Span("Confirm this action", id="dclm-confirm-message"), cls="text-body"),
+        modal_id="dclmConfirmModal",
+        title="Please confirm",
+        footer=Div(
+            Button("Cancel", type="button", data_bs_dismiss="modal", id="dclm-confirm-cancel", cls="btn btn-outline-secondary rounded-pill px-4"),
+            Button("Continue", type="button", id="dclm-confirm-accept", cls="btn btn-primary rounded-pill px-4 fw-semibold"),
+            cls="d-flex justify-content-end gap-2",
+        ),
+    )
+
+
 def app_shell(
     *,
     active_screen: str,
@@ -105,6 +118,7 @@ def app_shell(
                     cls="flex-grow-1"
                 ),
                 setup_modal(),
+                confirmation_modal(),
                 bottom_nav_bar(active_screen),
                 Div(id="dclm-toast-container", cls="dclm-toast"),
                 Script(f"window.__DCLM_UTILITY_BOOT__ = {json.dumps(boot_data)};"),
