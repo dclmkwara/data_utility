@@ -264,7 +264,8 @@ const DCLM_DB = (function () {
       return new Set([...recent, ...confirmed]
         .filter((item) => String(item.context_key || item.event_id || "") === String(eventId)
           && (item.type === undefined || item.type === "Attendance"))
-        .map((item) => String(item.worker_id || ""))
+        .flatMap((item) => [item.worker_id, ...(Array.isArray(item.present_workers) ? item.present_workers.map((worker) => worker.worker_id) : [])])
+        .map((workerId) => String(workerId || ""))
         .filter(Boolean));
     },
 
@@ -272,8 +273,47 @@ const DCLM_DB = (function () {
       const pending = await this.getAllFromQueue("attendance_queue");
       return new Set(pending
         .filter((item) => String(item.context_key || item.event_id || "") === String(eventId))
-        .map((item) => String(item.worker_id || ""))
+        .flatMap((item) => [item.worker_id, ...(Array.isArray(item.present_workers) ? item.present_workers.map((worker) => worker.worker_id) : [])])
+        .map((workerId) => String(workerId || ""))
         .filter(Boolean));
+    },
+
+    async normalizeLegacyAttendanceQueue() {
+      const pending = await this.getAllFromQueue("attendance_queue");
+      const groups = new Map();
+      for (const item of pending) {
+        if (Array.isArray(item.present_workers) || !item.worker_id) continue;
+        const contextKey = item.context_key || item.event_id || `routine:${item.location_id}:${item.service_date}`;
+        const key = [contextKey, item.location_id, item.service_date, item.church_type, item.program_domain, item.program_type].join("|");
+        if (!groups.has(key)) groups.set(key, []);
+        groups.get(key).push(item);
+      }
+      let converted = 0;
+      for (const items of groups.values()) {
+        const first = items[0];
+        const contextKey = first.context_key || first.event_id || `routine:${first.location_id}:${first.service_date}`;
+        const roster = await this.getWorkerRoster(first.location_id, contextKey);
+        if (!roster.length) continue;
+        const workers = new Map();
+        for (const item of items) workers.set(String(item.worker_id), {
+          worker_id: item.worker_id,
+          worker_name: item.worker_name || "Church Worker",
+        });
+        const capture = {
+          ...first,
+          client_id: first.client_id,
+          context_key: contextKey,
+          expected_workers_count: roster.length,
+          present_workers: Array.from(workers.values()),
+          submitted_by_worker_id: window.DCLM_CURRENT_USER?.worker_id || null,
+          last_error: items.find((item) => item.last_error)?.last_error || null,
+          converted_from_legacy: true,
+        };
+        await this.addToQueue("attendance_queue", capture);
+        for (const item of items.slice(1)) await this.removeFromQueue("attendance_queue", item.client_id);
+        converted += items.length;
+      }
+      return converted;
     },
 
     async confirmAttendance(workerId, eventId) {

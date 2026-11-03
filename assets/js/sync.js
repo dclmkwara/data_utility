@@ -1,10 +1,10 @@
-/** Lossless per-record sync for Church_server's batch contract. */
+/** Lossless sync for field records and atomic roster attendance captures. */
 const DCLM_SYNC = (function () {
   const QUEUES = [
     ["counts_queue", "counts", "Headcount"],
     ["offerings_queue", "offerings", "Offering"],
     ["registration_queue", "records", "Registration"],
-    ["attendance_queue", "worker_attendance", "Attendance"],
+    ["attendance_queue", "worker_attendance_submissions", "Attendance"],
     ["fellowship_members_queue", "fellowship_members", "Fellowship Member"],
     ["fellowship_attendance_queue", "fellowship_attendance", "Fellowship Attendance"],
     ["fellowship_offerings_queue", "fellowship_offerings", "Fellowship Offering"],
@@ -17,6 +17,7 @@ const DCLM_SYNC = (function () {
 
   async function postMany(group, items) {
     const payload = Object.fromEntries(QUEUES.map(([, field]) => [field, []]));
+    payload.worker_attendance = [];
     payload[group.field].push(...items.map((item) => payloadFor(group, item)));
     const response = await window.DCLM_AUTH.apiFetch("/api/sync", {
       method: "POST", headers: { "Content-Type": "application/json" },
@@ -29,8 +30,9 @@ const DCLM_SYNC = (function () {
 
   async function rememberConfirmed(group, item, outcome) {
     const now = new Date().toISOString();
-    if (group.field === "worker_attendance") {
-      await DCLM_DB.confirmAttendance(item.worker_id, item.context_key || item.event_id);
+    if (group.field === "worker_attendance_submissions") {
+      const contextKey = item.context_key || item.event_id || `routine:${item.location_id}:${item.service_date}`;
+      for (const worker of item.present_workers || []) await DCLM_DB.confirmAttendance(worker.worker_id, contextKey);
     }
     await DCLM_DB.addToQueue("recent_submissions", {
       client_id: item.client_id, type: group.label, synced_at: now, outcome,
@@ -80,7 +82,7 @@ const DCLM_SYNC = (function () {
           queued += 1;
         }
       }
-      if (group.field === "worker_attendance" && submitted > 0 && queued === 0) {
+      if (group.field === "worker_attendance_submissions" && submitted > 0 && queued === 0) {
         await window.DCLM_APP.onAttendanceSyncConfirmed(items[0].context_key || items[0].event_id);
       }
       await DCLM_APP.refreshHomeQueueSummary();
@@ -138,6 +140,17 @@ const DCLM_SYNC = (function () {
       record_type: item.record_type, name: item.name, gender: item.gender, phone: item.phone,
       details: item.details || {}, note: item.note || null, submission_channel: "field_utility",
     };
+    if (group.field === "worker_attendance_submissions") return {
+      client_id: item.client_id, event_id: item.event_id || null, location_id: item.location_id,
+      date: `${item.service_date}T00:00:00Z`, church_type: item.church_type,
+      program_domain: item.program_domain, program_type: item.program_type,
+      expected_workers_count: Number(item.expected_workers_count || 0),
+      present_workers: (item.present_workers || []).map((worker) => ({
+        worker_id: worker.worker_id, worker_name: worker.worker_name || worker.name || "Church Worker",
+      })),
+      submitted_by_worker_id: item.submitted_by_worker_id || null,
+      note: item.note || null,
+    };
     return {
       client_id: item.client_id, event_id: item.event_id || null, location_id: item.location_id,
       date: `${item.service_date}T00:00:00Z`, church_type: item.church_type,
@@ -156,6 +169,7 @@ const DCLM_SYNC = (function () {
       DCLM_APP.showToast("Device is offline. Saved records remain on this device.", "warning");
       return { ok: false, offline: true };
     }
+    await DCLM_DB.normalizeLegacyAttendanceQueue();
     const groups = await Promise.all(QUEUES.map(async ([store, field, label]) => ({
       store, field, label, items: await DCLM_DB.getAllFromQueue(store),
     })));
@@ -164,7 +178,7 @@ const DCLM_SYNC = (function () {
       DCLM_APP.showToast("No pending records to sync.", "info");
       return { ok: true, synced: 0 };
     }
-    const needsEditNotice = entries.some(({ group }) => ["offerings", "worker_attendance", "fellowship_attendance", "fellowship_offerings"].includes(group.field));
+    const needsEditNotice = entries.some(({ group }) => ["offerings", "worker_attendance_submissions", "fellowship_attendance", "fellowship_offerings"].includes(group.field));
     if (needsEditNotice && !(await window.DCLM_APP.confirm("Some offering and attendance records are included. Editing them after submission requires elevated approval. Continue with submission?", { title: "Confirm submission", confirmLabel: "Submit all" }))) {
       return { ok: false, cancelled: true };
     }
@@ -198,6 +212,7 @@ const DCLM_SYNC = (function () {
     for (let offset = 0; offset < eligible.length; offset += 500) {
       const chunk = eligible.slice(offset, offset + 500);
       const payload = Object.fromEntries(QUEUES.map(([, field]) => [field, []]));
+      payload.worker_attendance = [];
       for (const { group, item } of chunk) payload[group.field].push(payloadFor(group, item));
       const attemptedAt = new Date().toISOString();
       const attempted = chunk.map(({ group, item }) => ({
@@ -240,8 +255,9 @@ const DCLM_SYNC = (function () {
           ? details.find((row) => String(row.client_id) === String(item.client_id))
           : null;
         if (outcome && ["synced", "duplicate"].includes(outcome.status)) {
-          if (group.field === "worker_attendance") {
-            await DCLM_DB.confirmAttendance(item.worker_id, item.context_key || item.event_id);
+          if (group.field === "worker_attendance_submissions") {
+            const contextKey = item.context_key || item.event_id || `routine:${item.location_id}:${item.service_date}`;
+            for (const worker of item.present_workers || []) await DCLM_DB.confirmAttendance(worker.worker_id, contextKey);
           }
           await DCLM_DB.addToQueue("recent_submissions", {
             client_id: item.client_id, type: group.label, synced_at: now, outcome: outcome.status,
@@ -249,7 +265,7 @@ const DCLM_SYNC = (function () {
             event_id: item.event_id, context_key: item.context_key || null, worker_id: item.worker_id || null,
           });
           await DCLM_DB.removeFromQueue(group.store, item.client_id);
-          if (group.field === "worker_attendance") confirmedAttendanceContexts.add(item.context_key || item.event_id);
+          if (group.field === "worker_attendance_submissions") confirmedAttendanceContexts.add(item.context_key || item.event_id || `routine:${item.location_id}:${item.service_date}`);
           synced += 1;
         } else {
           failed += 1;
@@ -275,11 +291,21 @@ const DCLM_SYNC = (function () {
   }
 
   async function syncQueueItem(store, clientId) {
+    if (store === "attendance_queue") {
+      await DCLM_DB.normalizeLegacyAttendanceQueue();
+    }
     const item = (await DCLM_DB.getAllFromQueue(store)).find((row) => String(row.client_id) === String(clientId));
-    if (!item) return { ok: false, missing: true };
+    if (!item) {
+      DCLM_APP.showToast("This saved record is no longer in the queue. Refresh the list and try again.", "warning");
+      return { ok: false, missing: true };
+    }
     if (!navigator.onLine) {
       DCLM_APP.showToast("Device is offline. This record remains saved on this device.", "warning");
       return { ok: false, offline: true };
+    }
+    if (store === "attendance_queue" && !Array.isArray(item.present_workers)) {
+      DCLM_APP.showToast("This older attendance record cannot be submitted as a single capture yet. Refresh the worker roster, then review Sync Queues again.", "warning");
+      return { ok: false, legacyAttendance: true };
     }
     const result = await submitManyOrQueue(store, [item], { forceImmediate: true });
     return result;

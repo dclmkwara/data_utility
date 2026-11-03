@@ -864,25 +864,29 @@ const DCLM_APP = (function () {
 
     try {
       showToast(cached.length ? "Refreshing the saved roster; it may be out of date." : "Fetching location worker roster...", "info");
-      const resp = await window.DCLM_AUTH.apiFetch(`/api/workers?location_id=${encodeURIComponent(locationId)}`);
-      const data = await resp.json();
-
-      if (!resp.ok) throw new Error(data.error || "Could not load the worker roster.");
-
-      if (data.ok && Array.isArray(data.items)) {
-        cachedRoster = data.items.map((worker) => ({
-          ...worker,
-          marked_present: false,
-          attendance_submitted: submittedWorkers.has(String(worker.worker_id)),
-          attendance_queued: pendingWorkers.has(String(worker.worker_id)) && !submittedWorkers.has(String(worker.worker_id)),
-        }));
-        await DCLM_DB.saveWorkerRoster(cachedRoster, locationId);
-        rosterState = cachedRoster.length ? "fresh" : "empty";
-        showToast(cachedRoster.length
-          ? `Roster refreshed: ${cachedRoster.length} workers for ${assignedLocation?.location_name || displayLocationId(locationId)}.`
-          : "No approved workers were returned for this location.", cachedRoster.length ? "success" : "info");
-        renderWorkerRoster();
+      const rosterItems = [];
+      for (let skip = 0; skip <= 5000; skip += 500) {
+        const resp = await window.DCLM_AUTH.apiFetch(`/api/workers?location_id=${encodeURIComponent(locationId)}&skip=${skip}&limit=500`);
+        const data = await resp.json();
+        if (!resp.ok) throw new Error(data.error || "Could not load the worker roster.");
+        if (!data.ok || !Array.isArray(data.items)) throw new Error("The worker roster response was invalid.");
+        if (skip >= 5000 && data.items.length) throw new Error("This location has more than 5,000 workers. Ask the administrator to divide the roster capture.");
+        if (skip >= 5000) break;
+        rosterItems.push(...data.items);
+        if (data.items.length < 500) break;
       }
+      cachedRoster = rosterItems.map((worker) => ({
+        ...worker,
+        marked_present: false,
+        attendance_submitted: submittedWorkers.has(String(worker.worker_id)),
+        attendance_queued: pendingWorkers.has(String(worker.worker_id)) && !submittedWorkers.has(String(worker.worker_id)),
+      }));
+      await DCLM_DB.saveWorkerRoster(cachedRoster, locationId);
+      rosterState = cachedRoster.length ? "fresh" : "empty";
+      showToast(cachedRoster.length
+        ? `Roster refreshed: ${cachedRoster.length} workers for ${assignedLocation?.location_name || displayLocationId(locationId)}.`
+        : "No approved workers were returned for this location.", cachedRoster.length ? "success" : "info");
+      renderWorkerRoster();
     } catch (err) {
       console.warn("Could not fetch remote roster:", err);
       cachedRoster = (await DCLM_DB.getWorkerRoster(locationId, eventContextKey()))
@@ -1040,29 +1044,33 @@ const DCLM_APP = (function () {
     }
 
     const submittedWorkers = await DCLM_DB.getAttendanceSubmittedWorkerIds(contextKey);
-    const attendanceItems = marked.filter((worker) => !submittedWorkers.has(String(worker.worker_id))).map((worker) => ({
-      client_id: generateUUID(),
-      location_id: activeSetup.location_id || worker.location_id,
-      event_id: activeSetup.event_id || null,
-      context_key: contextKey,
-      church_type: activeSetup.church_type,
-      program_domain: activeSetup.program_domain,
-      program_type: activeSetup.program_type,
-      service_date: activeSetup.service_date,
-      worker_id: worker.worker_id,
-      worker_name: worker.name || "Church Worker",
-      status: "present",
-      recorded_at: new Date().toISOString(),
-    }));
-    if (!attendanceItems.length) {
+    const presentWorkers = marked.filter((worker) => !submittedWorkers.has(String(worker.worker_id)));
+    if (!presentWorkers.length) {
       showToast("These workers already have attendance records queued or confirmed for this event.", "info");
       return;
     }
     if (navigator.onLine && !(await confirm("Editing attendance after submission requires elevated approval. Submit the marked attendance now?", { title: "Submit workers attendance", confirmLabel: "Submit" }))) return;
 
     const submitButton = qs("#btn-approve-attendance-batch");
+    const attendanceCapture = {
+      client_id: generateUUID(),
+      location_id: activeSetup.location_id,
+      event_id: activeSetup.event_id || null,
+      context_key: contextKey,
+      church_type: activeSetup.church_type,
+      program_domain: activeSetup.program_domain,
+      program_type: activeSetup.program_type,
+      service_date: activeSetup.service_date,
+      expected_workers_count: roster.length,
+      present_workers: presentWorkers.map((worker) => ({
+        worker_id: worker.worker_id,
+        worker_name: worker.name || "Church Worker",
+      })),
+      submitted_by_worker_id: window.DCLM_CURRENT_USER?.worker_id || null,
+      recorded_at: new Date().toISOString(),
+    };
     const submission = await runButtonAction(submitButton, "Submitting...", () =>
-      DCLM_SYNC.submitManyOrQueue("attendance_queue", attendanceItems, { skipEditWarning: true }));
+      DCLM_SYNC.submitOrQueue("attendance_queue", attendanceCapture, { skipEditWarning: true, forceImmediate: true }));
     if (!submission) return;
     if (!submission.submitted && !submission.queued) return;
     const queuedWorkers = await DCLM_DB.getAttendancePendingWorkerIds(contextKey);
@@ -1349,6 +1357,8 @@ const DCLM_APP = (function () {
 
     if (!listEl) return;
 
+    await DCLM_DB.normalizeLegacyAttendanceQueue();
+
     const legacyCount = await DCLM_DB.getUnassignedQueueCount();
     const legacyNotice = qs("#legacy-queue-notice");
     const legacyMessage = qs("#legacy-queue-message");
@@ -1408,8 +1418,9 @@ const DCLM_APP = (function () {
         html += `
           <div class="dclm-queue-item type-attendance">
             <div>
-              <div class="fw-bold text-dark small"><i class="bi bi-person-check-fill text-info me-1"></i> Worker Attendance · ${escapeHTML(item.worker_name || "Worker")}</div>
-              <div class="small text-muted">${escapeHTML(item.program_type || "Workers Meeting")} · ${escapeHTML(item.service_date || "Date unavailable")}</div>
+              <div class="fw-bold text-dark small"><i class="bi bi-person-check-fill text-info me-1"></i> Worker Attendance - ${escapeHTML(Array.isArray(item.present_workers) ? `${item.present_workers.length} workers of ${Number(item.expected_workers_count || 0).toLocaleString()}` : item.worker_name || "Legacy individual record")}</div>
+              <div class="small text-muted">${escapeHTML(item.program_type || "Workers Meeting")} - ${escapeHTML(item.service_date || "Date unavailable")}</div>
+              ${Array.isArray(item.present_workers) ? `<div class="small text-muted mt-1">${escapeHTML(item.present_workers.slice(0, 5).map((worker) => worker.worker_name || worker.name || "Church Worker").join(", "))}${item.present_workers.length > 5 ? ` + ${item.present_workers.length - 5} more` : ""}</div>` : ""}
               ${item.last_error ? `<div class="small text-danger mt-1">Sync issue: ${escapeHTML(item.last_error)}</div>` : ""}
             </div>
             <div class="d-flex gap-2"><button class="btn btn-sm btn-primary rounded-pill px-3" data-sync-store="attendance_queue" data-sync-id="${escapeHTML(item.client_id)}">Sync</button><button class="btn btn-sm btn-outline-danger rounded-pill px-3" data-discard-store="attendance_queue" data-discard-id="${escapeHTML(item.client_id)}">Discard</button></div>

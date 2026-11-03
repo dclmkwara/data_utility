@@ -115,12 +115,12 @@ class BackendClient:
         )
         self._raise_for_error(resp)
 
-    async def get_workers(self, location_id: str, access_token: str) -> list[dict[str, Any]]:
+    async def get_workers(self, location_id: str, access_token: str, *, skip: int = 0, limit: int = 500) -> list[dict[str, Any]]:
         """Fetch worker roster from FastAPI backend GET /api/v1/attendance/workers."""
         resp = await self._request(
             "GET",
             "/api/v1/attendance/workers",
-            params={"location_id": location_id, "limit": 500},
+            params={"location_id": location_id, "skip": skip, "limit": min(max(limit, 1), 500)},
             headers={"Authorization": f"Bearer {access_token}"},
         )
         self._raise_for_error(resp)

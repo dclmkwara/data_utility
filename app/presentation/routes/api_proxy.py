@@ -165,7 +165,7 @@ def setup_api_proxy_routes(app: Any) -> None:
         return response
 
     @app.get("/api/workers")
-    async def get_location_workers(request: Request, location_id: str = ""):
+    async def get_location_workers(request: Request, location_id: str = "", skip: int = 0, limit: int = 500):
         session = _session(request)
         if not session:
             return JSONResponse({"ok": False, "error": "Sign in to load workers.", "items": []}, status_code=401)
@@ -173,7 +173,7 @@ def setup_api_proxy_routes(app: Any) -> None:
         if not norm_loc:
             return JSONResponse({"ok": False, "error": "Location ID required.", "items": []}, status_code=400)
         try:
-            items = await backend_client.get_workers(norm_loc, session["access_token"])
+            items = await backend_client.get_workers(norm_loc, session["access_token"], skip=skip, limit=limit)
         except Exception as exc:
             return _response_error(exc)
         return JSONResponse({"ok": True, "source": "backend", "items": items})
@@ -273,7 +273,7 @@ def setup_api_proxy_routes(app: Any) -> None:
         if not isinstance(body, dict):
             return JSONResponse({"ok": False, "error": "Sync payload must be a JSON object."}, status_code=400)
         resource_names = (
-            "counts", "offerings", "records", "worker_attendance",
+            "counts", "offerings", "records", "worker_attendance", "worker_attendance_submissions",
             "fellowship_members", "fellowship_attendance", "fellowship_offerings",
         )
         total = 0
@@ -283,7 +283,7 @@ def setup_api_proxy_routes(app: Any) -> None:
                 return JSONResponse({"ok": False, "error": f"{resource_name} must be a list."}, status_code=400)
             total += len(items)
             for index, item in enumerate(items):
-                event_resource = resource_name in {"counts", "offerings", "records", "worker_attendance"}
+                event_resource = resource_name in {"counts", "offerings", "records", "worker_attendance", "worker_attendance_submissions"}
                 identity_keys = ("client_id", "location_id") if event_resource else ("client_id", "fellowship_id")
                 if not isinstance(item, dict) or any(not item.get(key) for key in identity_keys):
                     return JSONResponse({
@@ -311,6 +311,24 @@ def setup_api_proxy_routes(app: Any) -> None:
                         return JSONResponse({"ok": False, "error": f"{resource_name}[{index}] requires a program domain when no scheduled event is selected."}, status_code=422)
                     if str(item.get("program_domain") or "").lower() == "crusade" and not item.get("event_id"):
                         return JSONResponse({"ok": False, "error": f"{resource_name}[{index}] crusade submissions require a scheduled event."}, status_code=422)
+                if resource_name == "worker_attendance_submissions":
+                    present = item.get("present_workers")
+                    if not isinstance(present, list) or not present or len(present) > 5000:
+                        return JSONResponse({"ok": False, "error": "Attendance capture must include between 1 and 5,000 present workers."}, status_code=422)
+                    try:
+                        if item.get("submitted_by_worker_id"):
+                            UUID(str(item["submitted_by_worker_id"]))
+                        worker_ids = [UUID(str(worker.get("worker_id"))) for worker in present if isinstance(worker, dict)]
+                        if len(worker_ids) != len(present) or len(set(worker_ids)) != len(worker_ids):
+                            raise ValueError("duplicate or malformed worker ID")
+                    except (ValueError, TypeError, AttributeError):
+                        return JSONResponse({"ok": False, "error": "Attendance capture contains an invalid or duplicate worker."}, status_code=422)
+                    try:
+                        expected_count = int(item.get("expected_workers_count", -1))
+                    except (ValueError, TypeError):
+                        expected_count = -1
+                    if expected_count < len(present):
+                        return JSONResponse({"ok": False, "error": "Present workers cannot exceed the expected roster count."}, status_code=422)
                 if resource_name in {"fellowship_attendance", "fellowship_offerings"}:
                     raw_date = str(item.get("date") or "")
                     try:

@@ -59,11 +59,11 @@ def create_app() -> FastHTML:
         Link(rel="apple-touch-icon", href="/assets/icon-192.png"),
         Link(rel="manifest", href="/assets/manifest.json"),
         Link(rel="stylesheet", href="/assets/css/utility.css?v=12"),
-        Script(src="/assets/js/db.js?v=10", defer=True),
+        Script(src="/assets/js/db.js?v=11", defer=True),
         Script(src="/assets/js/auth.js?v=4", defer=True),
         Script(src="/assets/js/haptics.js?v=5", defer=True),
-        Script(src="/assets/js/sync.js?v=10", defer=True),
-        Script(src="/assets/js/app.js?v=18", defer=True),
+        Script(src="/assets/js/sync.js?v=12", defer=True),
+        Script(src="/assets/js/app.js?v=20", defer=True),
         Script(sw_registration),
     ]
 
