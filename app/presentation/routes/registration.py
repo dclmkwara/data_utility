@@ -56,33 +56,25 @@ def setup_registration_routes(app: Any) -> None:
                     ),
                 ),
 
-                # Gender & Phone
-                Row(
-                    Col(
-                        Label("Gender *", for_="reg_gender", cls="form-label small fw-bold text-muted mb-1"),
-                        Select(
-                            Option("Select...", value=""),
-                            Option("Male", value="Male"),
-                            Option("Female", value="Female"),
-                            id="reg_gender",
-                            cls="form-select rounded-3 mb-3",
-                            required=True,
-                        ),
-                        cols=5
+                Div(
+                    Label("Gender *", for_="reg_gender", cls="form-label small fw-bold text-muted mb-1"),
+                    Select(
+                        Option("Select...", value=""),
+                        Option("Male", value="Male"),
+                        Option("Female", value="Female"),
+                        id="reg_gender",
+                        cls="form-select rounded-3 mb-3",
+                        required=True,
                     ),
-                    Col(
-                        Label("Phone Number *", for_="reg_phone", cls="form-label small fw-bold text-muted mb-1"),
-                        Input(
-                            id="reg_phone",
-                            type="tel",
-                            placeholder="080...",
-                            maxlength="30",
-                            cls="form-control rounded-3 mb-3",
-                            required=True,
-                        ),
-                        cols=7
+                    Label("Phone Number *", for_="reg_phone", cls="form-label small fw-bold text-muted mb-1"),
+                    Input(
+                        id="reg_phone",
+                        type="tel",
+                        placeholder="080...",
+                        maxlength="30",
+                        cls="form-control rounded-3 mb-3",
+                        required=True,
                     ),
-                    cls="g-2"
                 ),
 
                 Details(
@@ -104,58 +96,37 @@ def setup_registration_routes(app: Any) -> None:
                 ),
 
                 # Marital & Social Status
-                Row(
-                    Col(
-                        Label("Marital Status", for_="reg_marital_status", cls="form-label small fw-bold text-muted mb-1"),
-                        Select(
-                            Option("Select...", value=""),
-                            *[Option(label, value=key) for key, label in MARITAL_STATUSES],
-                            id="reg_marital_status",
-                            cls="form-select rounded-3 mb-3",
-                        ),
-                        cols=6
+                Div(
+                    Label("Marital Status", for_="reg_marital_status", cls="form-label small fw-bold text-muted mb-1"),
+                    Select(
+                        Option("Select...", value=""),
+                        *[Option(label, value=key) for key, label in MARITAL_STATUSES],
+                        id="reg_marital_status",
+                        cls="form-select rounded-3 mb-3",
                     ),
-                    Col(
-                        Label("Social Status", for_="reg_social_status", cls="form-label small fw-bold text-muted mb-1"),
-                        Select(
-                            Option("Select...", value=""),
-                            *[Option(label, value=key) for key, label in SOCIAL_STATUSES],
-                            id="reg_social_status",
-                            cls="form-select rounded-3 mb-3",
-                        ),
-                        cols=6
+                    Label("Social Status", for_="reg_social_status", cls="form-label small fw-bold text-muted mb-1"),
+                    Select(
+                        Option("Select...", value=""),
+                        *[Option(label, value=key) for key, label in SOCIAL_STATUSES],
+                        id="reg_social_status",
+                        cls="form-select rounded-3 mb-3",
                     ),
-                    cls="g-2"
                 ),
 
                 # Profession & Workplace
-                Row(
-                    Col(
-                        Label("Profession / School", for_="reg_profession", cls="form-label small fw-bold text-muted mb-1"),
-                        Input(id="reg_profession", type="text", maxlength="120", placeholder="Occupation or course", cls="form-control rounded-3 mb-3"),
-                        cols=6
-                    ),
-                    Col(
-                        Label("Work / School Address", for_="reg_work_address", cls="form-label small fw-bold text-muted mb-1"),
-                        Input(id="reg_work_address", type="text", maxlength="300", placeholder="Company or campus location", cls="form-control rounded-3 mb-3"),
-                        cols=6
-                    ),
-                    cls="g-2"
+                Div(
+                    Label("Profession / School", for_="reg_profession", cls="form-label small fw-bold text-muted mb-1"),
+                    Input(id="reg_profession", type="text", maxlength="120", placeholder="Occupation or course", cls="form-control rounded-3 mb-3"),
+                    Label("Work / School Address", for_="reg_work_address", cls="form-label small fw-bold text-muted mb-1"),
+                    Input(id="reg_work_address", type="text", maxlength="300", placeholder="Company or campus location", cls="form-control rounded-3 mb-3"),
                 ),
 
                 # Class Level & Invited By
-                Row(
-                    Col(
-                        Label("Class Level (Youth/Campus)", for_="reg_class_level", cls="form-label small fw-bold text-muted mb-1"),
-                        Input(id="reg_class_level", type="text", maxlength="60", placeholder="e.g. 200L, SS2", cls="form-control rounded-3 mb-3"),
-                        cols=6
-                    ),
-                    Col(
-                        Label("Invited By", for_="reg_invited_by", cls="form-label small fw-bold text-muted mb-1"),
-                        Input(id="reg_invited_by", type="text", maxlength="120", placeholder="Name of inviting member", cls="form-control rounded-3 mb-3"),
-                        cols=6
-                    ),
-                    cls="g-2"
+                Div(
+                    Label("Class Level (Youth/Campus)", for_="reg_class_level", cls="form-label small fw-bold text-muted mb-1"),
+                    Input(id="reg_class_level", type="text", maxlength="60", placeholder="e.g. 200L, SS2", cls="form-control rounded-3 mb-3"),
+                    Label("Invited By", for_="reg_invited_by", cls="form-label small fw-bold text-muted mb-1"),
+                    Input(id="reg_invited_by", type="text", maxlength="120", placeholder="Name of inviting member", cls="form-control rounded-3 mb-3"),
                 ),
 
                 # Salvation Decision Type

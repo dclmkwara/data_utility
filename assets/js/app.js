@@ -13,6 +13,7 @@ const DCLM_APP = (function () {
   let assignedFellowships = [];
   let cachedRoster = [];
   let rosterState = "not_loaded";
+  let hapticsFailureNotified = false;
 
   // Local counter tally state
   let counterState = {
@@ -73,15 +74,88 @@ const DCLM_APP = (function () {
   }
 
   function haptic(effect) {
+    if (window.__DCLM_HAPTICS_ENABLED__ === false) return false;
     if (typeof DCLM_HAPTICS !== "undefined" && typeof DCLM_HAPTICS[effect] === "function") {
-      DCLM_HAPTICS[effect]();
+      const result = DCLM_HAPTICS[effect]();
+      if (result === true) return true;
+      if (result === false) {
+        if (typeof navigator.vibrate === "function" && !hapticsFailureNotified) {
+          hapticsFailureNotified = true;
+          setTimeout(() => showToast("Vibration is unavailable. Check device vibration settings and open this app in a supported browser.", "warning"), 0);
+        }
+        return false;
+      }
     }
+    if (typeof navigator.vibrate === "function") {
+      const pattern = effect === "success" ? [25, 35, 25] : effect === "warning" ? [60, 30, 60] : effect === "tick" ? 12 : 22;
+      const result = navigator.vibrate(pattern);
+      if (result === false && !hapticsFailureNotified) {
+        hapticsFailureNotified = true;
+        setTimeout(() => showToast("Vibration is unavailable. Check device vibration settings and open this app in a supported browser.", "warning"), 0);
+      }
+      return result;
+    }
+    return false;
+  }
+
+  async function refreshHapticsSetting() {
+    const toggle = qs("#setting-haptics-enabled");
+    const message = qs("#settings-haptics-status");
+    const enabled = await DCLM_DB.getHapticsEnabled();
+    window.__DCLM_HAPTICS_ENABLED__ = enabled;
+    if (toggle) toggle.checked = enabled;
+    if (message) message.textContent = typeof navigator.vibrate === "function"
+      ? (enabled ? "This browser supports vibration. Test it below; if there is no feedback, enable vibration in your device settings." : "Vibration is turned off. Enable it to get touch feedback.")
+      : "This browser or device does not support vibration. Try the installed app on a supported Android device.";
+    if (toggle) toggle.disabled = typeof navigator.vibrate !== "function";
+    const testButton = qs("#btn-test-haptics");
+    if (testButton) testButton.disabled = typeof navigator.vibrate !== "function";
+  }
+
+  function safeUiText(value) {
+    let text = String(value ?? "");
+    const extractMessage = (payload) => {
+      if (typeof payload === "string") return payload;
+      if (Array.isArray(payload)) return payload.map(extractMessage).filter(Boolean).join("; ");
+      if (payload && typeof payload === "object") {
+        for (const key of ["detail", "message", "msg", "error", "reason"]) {
+          if (payload[key] !== undefined && payload[key] !== null) return extractMessage(payload[key]);
+        }
+      }
+      return "The record could not be submitted. Please try again.";
+    };
+    const jsonStart = text.search(/[\[{]/);
+    if (jsonStart >= 0 && (text.trimStart().startsWith("{") || text.trimStart().startsWith("["))) {
+      try {
+        text = extractMessage(JSON.parse(text));
+      } catch (_) {
+        text = text.replace(/^\s*[\[{].*[\]}]\s*$/, "The record could not be submitted. Please try again.");
+      }
+    }
+    if (text === "[object Object]") text = "The request could not be completed. Please try again.";
+    text = text
+      .replace(/Church_server/gi, "church records service")
+      .replace(/\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/gi, "record ID")
+      .replace(/\s+/g, " ").trim();
+    return text.length > 320 ? `${text.slice(0, 317)}...` : text;
   }
 
   function escapeHTML(value) {
-    return String(value || "").replace(/Church_server/gi, "church records service").replace(/[&<>"']/g, (char) => ({
+    return safeUiText(value).replace(/[&<>"']/g, (char) => ({
       "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
     })[char]);
+  }
+
+  function displayLocationId(locationId) {
+    const isUuid = (value) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(value || ""));
+    const readable = (...values) => values.find((value) => value && !isUuid(value));
+    if (assignedLocation?.location_id && String(locationId) === String(assignedLocation.location_id)) {
+      return safeUiText(readable(assignedLocation.formatted_id, assignedLocation.location_name) || "Location ID unavailable");
+    }
+    if (activeSetup?.location_id && String(locationId) === String(activeSetup.location_id)) {
+      return safeUiText(readable(assignedLocation?.formatted_id, activeSetup.location_label) || "Location ID unavailable");
+    }
+    return "Location ID unavailable";
   }
 
   function showToast(message, type = "info") {
@@ -89,7 +163,7 @@ const DCLM_APP = (function () {
     if (!container) return;
 
     container.className = `dclm-toast dclm-toast--${type} is-visible`;
-    container.textContent = String(message || "").replace(/Church_server/gi, "church records service");
+    container.textContent = safeUiText(message);
 
     clearTimeout(container._timer);
     container._timer = setTimeout(() => {
@@ -138,11 +212,7 @@ const DCLM_APP = (function () {
     const iconEl = qs("#identity-bar-icon");
 
     if (activeScreen === "fellowship") {
-      if (barEl) barEl.className = "dclm-identity-bar is-active";
-      if (iconEl) iconEl.className = "bi bi-house-heart fs-5 me-2 text-primary";
-      if (titleEl) titleEl.textContent = assignedLocation?.location_name || "Home Fellowship";
-      if (subEl) subEl.textContent = "Choose the assigned fellowship below; event setup is not required.";
-      if (btnEl) btnEl.textContent = "Program setup";
+      if (barEl) barEl.classList.add("d-none");
       if (shieldEl) shieldEl.classList.add("d-none");
       qsa("[id$='-content-wrap']").forEach((el) => el.classList.remove("d-none"));
     } else if (activeSetup && activeSetup.location_id && activeSetup.service_date && activeSetup.program_type) {
@@ -152,17 +222,15 @@ const DCLM_APP = (function () {
       if (iconEl) {
         iconEl.className = "bi bi-shield-check fs-5 me-2 text-primary";
       }
-      if (titleEl) {
-        titleEl.textContent = `${activeSetup.church_type} • ${activeSetup.program_type} • ${activeSetup.location_id}`;
-      }
-      if (subEl) {
-        subEl.textContent = `Scope: ${activeSetup.program_level} Level • Date: ${activeSetup.service_date}`;
-      }
+      const locationLabel = displayLocationId(activeSetup.assigned_location_id || activeSetup.location_id);
+      if (titleEl) titleEl.textContent = safeUiText(activeSetup.event_title || activeSetup.program_type || "Church program");
+      if (subEl) subEl.textContent = `${locationLabel} · ${activeSetup.service_date}`;
       if (btnEl) btnEl.textContent = "Change";
       if (shieldEl) shieldEl.classList.add("d-none");
       // Show all content wraps now that setup is active
       qsa("[id$='-content-wrap']").forEach((el) => el.classList.remove("d-none"));
     } else {
+      if (barEl) barEl.classList.remove("d-none");
       if (barEl) {
         barEl.className = "dclm-identity-bar is-missing";
       }
@@ -229,10 +297,16 @@ const DCLM_APP = (function () {
       const data = await response.json();
       if (!response.ok || !data.ok) throw new Error(data.error || "Could not load your assigned location.");
       apply(data.location);
-      if (activeScreen === "fellowship") await refreshActiveSetup();
+      await refreshActiveSetup();
+      if (activeScreen === "attendance") {
+        updateAttendanceSetupGate();
+        if (window.location.pathname.endsWith("/review")) renderAttendanceReview();
+      }
+      const settingsLocation = qs("#settings-user-location");
+      if (settingsLocation) settingsLocation.textContent = displayLocationId(location.location_id);
     } catch (error) {
       apply(null);
-      showToast(error.message, "warning");
+      showToast(error.message || "Could not load your assigned location.", "warning");
     }
   }
 
@@ -271,6 +345,7 @@ const DCLM_APP = (function () {
       for (const event of data.items) {
         const option = new Option([event.title || event.program_type?.name || programType, event.date, event.event_mode].filter(Boolean).join(" · "), event.id);
         option.dataset.locationId = event.location_id || locationId;
+        option.dataset.title = event.title || event.program_type?.name || programType;
         options.push(option);
       }
       select.replaceChildren(...options);
@@ -338,6 +413,7 @@ const DCLM_APP = (function () {
     const identity = {
       program_domain: formData.program_domain,
       program_type: formData.program_type,
+      event_title: selectedEventId ? (eventOption?.dataset.title || formData.program_type) : formData.program_type,
       program_level: formData.program_level,
       location_id: eventLocationId,
       assigned_location_id: assignedLocation?.location_id || normalizedLocation,
@@ -376,10 +452,11 @@ const DCLM_APP = (function () {
     showToast("Program ecclesiastical identity saved!", "success");
     haptic("success");
 
-    // Fetch and cache location worker roster immediately
-    fetchLocationRoster(identity.assigned_location_id || identity.location_id);
-
     await refreshActiveSetup();
+    updateAttendanceSetupGate();
+    if (activeScreen === "attendance" && isWorkerAttendanceProgram()) {
+      await fetchLocationRoster(identity.assigned_location_id || identity.location_id);
+    }
     return true;
   }
 
@@ -441,7 +518,7 @@ const DCLM_APP = (function () {
       }
       if (qs("#modal_program_type")) qs("#modal_program_type").value = activeSetup.program_type || "";
       if (qs("#modal_program_level")) qs("#modal_program_level").value = activeSetup.program_level || "";
-      if (qs("#modal_location_id")) qs("#modal_location_id").value = activeSetup.location_id || "";
+      if (qs("#modal_location_id")) qs("#modal_location_id").value = activeSetup.assigned_location_id || activeSetup.location_id || "";
       if (qs("#modal_location_label")) qs("#modal_location_label").value = activeSetup.location_label || assignedLocation?.formatted_id || "";
       if (qs("#modal_service_date")) qs("#modal_service_date").value = activeSetup.service_date || todayISO();
       if (qs("#modal_event_id")) qs("#modal_event_id").value = activeSetup.event_id || "";
@@ -454,7 +531,7 @@ const DCLM_APP = (function () {
       }
       if (qs("#page_program_type")) qs("#page_program_type").value = activeSetup.program_type || "";
       if (qs("#page_program_level")) qs("#page_program_level").value = activeSetup.program_level || "";
-      if (qs("#page_location_id")) qs("#page_location_id").value = activeSetup.location_id || "";
+      if (qs("#page_location_id")) qs("#page_location_id").value = activeSetup.assigned_location_id || activeSetup.location_id || "";
       if (qs("#page_location_label")) qs("#page_location_label").value = activeSetup.location_label || assignedLocation?.formatted_id || "";
       if (qs("#page_service_date")) qs("#page_service_date").value = activeSetup.service_date || todayISO();
       if (qs("#page_event_id")) qs("#page_event_id").value = activeSetup.event_id || "";
@@ -697,7 +774,11 @@ const DCLM_APP = (function () {
 
     const cached = await DCLM_DB.getWorkerRoster(locationId, eventContextKey());
     const submittedWorkers = await DCLM_DB.getAttendanceSubmittedWorkerIds(eventContextKey());
-    cachedRoster = cached.map((worker) => ({ ...worker, attendance_submitted: submittedWorkers.has(String(worker.worker_id)) }));
+    const pendingWorkers = await DCLM_DB.getAttendancePendingWorkerIds(eventContextKey());
+    cachedRoster = cached.map((worker) => ({ ...worker,
+      attendance_submitted: submittedWorkers.has(String(worker.worker_id)),
+      attendance_queued: pendingWorkers.has(String(worker.worker_id)) && !submittedWorkers.has(String(worker.worker_id)),
+    }));
     rosterState = cached.length ? "stale" : "loading";
     renderWorkerRoster();
     if (!navigator.onLine) {
@@ -722,11 +803,12 @@ const DCLM_APP = (function () {
           ...worker,
           marked_present: false,
           attendance_submitted: submittedWorkers.has(String(worker.worker_id)),
+          attendance_queued: pendingWorkers.has(String(worker.worker_id)) && !submittedWorkers.has(String(worker.worker_id)),
         }));
         await DCLM_DB.saveWorkerRoster(cachedRoster, locationId);
         rosterState = cachedRoster.length ? "fresh" : "empty";
         showToast(cachedRoster.length
-          ? `Roster refreshed: ${cachedRoster.length} workers for ${locationId}.`
+          ? `Roster refreshed: ${cachedRoster.length} workers for ${assignedLocation?.location_name || displayLocationId(locationId)}.`
           : "No approved workers were returned for this location.", cachedRoster.length ? "success" : "info");
         renderWorkerRoster();
       }
@@ -782,7 +864,7 @@ const DCLM_APP = (function () {
     listEl.innerHTML = "";
     filtered.forEach((worker) => {
       const card = document.createElement("div");
-      card.className = `dclm-worker-card ${worker.marked_present ? "is-marked" : ""} ${worker.attendance_submitted ? "is-submitted" : ""}`;
+      card.className = `dclm-worker-card ${worker.marked_present ? "is-marked" : ""} ${worker.attendance_submitted ? "is-submitted" : ""} ${worker.attendance_queued ? "is-queued" : ""}`;
       card.innerHTML = `
         <div class="d-flex align-items-center gap-3">
           <div class="rounded-circle bg-primary-subtle text-primary fw-bold d-flex align-items-center justify-content-center" style="width: 44px; height: 44px; font-size: 0.95rem;">
@@ -793,8 +875,8 @@ const DCLM_APP = (function () {
             <div class="small text-muted">${escapeHTML(worker.phone)} • ${escapeHTML(worker.unit || "General Worker")}</div>
           </div>
         </div>
-        <button type="button" class="dclm-check-btn ${worker.marked_present || worker.attendance_submitted ? "is-checked" : ""}" ${worker.attendance_submitted ? "disabled" : ""} aria-label="${worker.attendance_submitted ? "Attendance submitted" : "Toggle attendance"}">
-          ${worker.attendance_submitted ? "Submitted" : '<i class="bi bi-check-lg"></i>'}
+        <button type="button" class="dclm-check-btn ${worker.marked_present ? "is-checked" : ""} ${worker.attendance_submitted ? "is-submitted" : ""} ${worker.attendance_queued ? "is-queued" : ""}" ${worker.attendance_submitted || worker.attendance_queued ? "disabled" : ""} aria-label="${worker.attendance_submitted ? "Attendance submitted" : worker.attendance_queued ? "Attendance queued" : "Toggle attendance"}">
+          ${worker.attendance_submitted ? "Submitted" : worker.attendance_queued ? "Queued" : worker.marked_present ? "Present" : ""}
         </button>
       `;
       card.querySelector(".dclm-check-btn").dataset.workerId = worker.worker_id;
@@ -812,7 +894,7 @@ const DCLM_APP = (function () {
     });
   }
 
-  function renderAttendanceReview() {
+  async function renderAttendanceReview() {
     const presentListEl = qs("#review-marked-list");
     const presentCountEl = qs("#review-present-count");
     const rosterCountEl = qs("#review-roster-count");
@@ -824,112 +906,124 @@ const DCLM_APP = (function () {
       return;
     }
 
-    DCLM_DB.getWorkerRoster(activeSetup.location_id, eventContextKey()).then((roster) => {
-      const marked = roster.filter((w) => w.marked_present);
-      if (presentCountEl) presentCountEl.textContent = marked.length.toLocaleString();
-      if (rosterCountEl) rosterCountEl.textContent = roster.length.toLocaleString();
-      const scopeEl = qs("#review-setup-scope");
-      const contextEl = qs("#review-setup-context");
-      if (scopeEl) scopeEl.textContent = activeSetup.program_type;
-      if (contextEl) contextEl.textContent = `${assignedLocation?.location_name || "Assigned location"} · ${activeSetup.service_date}`;
+    const roster = await DCLM_DB.getWorkerRoster(activeSetup.location_id, eventContextKey());
+    const marked = roster.filter((worker) => worker.marked_present);
+    if (presentCountEl) presentCountEl.textContent = marked.length.toLocaleString();
+    if (rosterCountEl) rosterCountEl.textContent = roster.length.toLocaleString();
+    const locationName = assignedLocation?.location_name || activeSetup.location_name || "Assigned location";
+    const locationCode = displayLocationId(activeSetup.assigned_location_id || activeSetup.location_id);
+    const programEl = qs("#review-setup-program");
+    const locationEl = qs("#review-setup-location");
+    const locationIdEl = qs("#review-setup-location-id");
+    const dayEl = qs("#review-setup-day");
+    if (programEl) programEl.textContent = safeUiText(activeSetup.event_title || activeSetup.program_type || "Church program");
+    if (locationEl) locationEl.textContent = safeUiText(locationName);
+    if (locationIdEl) locationIdEl.textContent = locationCode;
+    if (dayEl) dayEl.textContent = new Date(`${activeSetup.service_date}T12:00:00`).toLocaleDateString(undefined, { weekday: "long", year: "numeric", month: "short", day: "numeric" });
 
-      if (marked.length === 0) {
-        presentListEl.innerHTML = '<div class="text-muted text-center py-4 small">No workers marked present yet.</div>';
-        return;
-      }
+    if (marked.length === 0) {
+      presentListEl.innerHTML = '<div class="text-muted text-center py-4 small">No workers marked present yet.</div>';
+      return;
+    }
 
-      presentListEl.replaceChildren();
-      for (const worker of marked) {
-        const row = document.createElement("div");
-        row.className = "d-flex justify-content-between align-items-center p-2 bg-white rounded-3 border";
-        const info = document.createElement("div");
-        const name = document.createElement("div");
-        name.className = "fw-bold text-dark small";
-        name.textContent = worker.name || "Church Worker";
-        const details = document.createElement("div");
-        details.className = "text-muted";
-        details.style.fontSize = "0.75rem";
-        details.textContent = `${worker.phone || ""} · ${worker.unit || "Worker"}`;
-        info.append(name, details);
-        const badge = document.createElement("span");
-        badge.className = "badge bg-success-subtle text-success rounded-pill px-3 py-1 small";
-        badge.textContent = "Present";
-        row.append(info, badge);
-        presentListEl.appendChild(row);
-      }
-    });
-
-    const approveBtn = qs("#btn-approve-attendance-batch");
-    if (approveBtn) {
-      approveBtn.addEventListener("click", async () => {
-        if (!isWorkerAttendanceProgram()) {
-          showToast("Attendance can only be submitted for worker or leader meetings, conferences, and retreats.", "warning");
-          return;
-        }
-        if (!activeSetup?.location_id || !activeSetup?.service_date || !activeSetup?.program_type
-            || (requiresScheduledEvent() && !activeSetup.event_id)) {
-          showToast(requiresScheduledEvent()
-            ? "Select the scheduled crusade event before reviewing attendance."
-            : "Complete service setup before reviewing attendance.", "warning");
-          return;
-        }
-        const contextKey = eventContextKey();
-        const roster = await DCLM_DB.getWorkerRoster(activeSetup.location_id, contextKey);
-        const marked = roster.filter((w) => w.marked_present);
-
-        if (marked.length === 0) {
-          showToast("No workers marked present to submit.", "warning");
-          haptic("warning");
-          return;
-        }
-
-        const submittedWorkers = await DCLM_DB.getAttendanceSubmittedWorkerIds(contextKey);
-        const attendanceItems = [];
-        for (const worker of marked) {
-          if (submittedWorkers.has(String(worker.worker_id))) continue;
-          const item = {
-            client_id: generateUUID(),
-            location_id: activeSetup?.location_id || worker.location_id,
-            event_id: activeSetup?.event_id || null,
-            context_key: contextKey,
-            church_type: activeSetup.church_type,
-            program_domain: activeSetup.program_domain,
-            program_type: activeSetup.program_type,
-            service_date: activeSetup.service_date,
-            worker_id: worker.worker_id,
-            status: "present",
-            recorded_at: new Date().toISOString(),
-          };
-          attendanceItems.push(item);
-        }
-
-        if (!attendanceItems.length) {
-          showToast("These workers already have attendance records queued or confirmed for this event.", "info");
-          return;
-        }
-        if (navigator.onLine && !window.confirm("Editing attendance after submission requires elevated approval. Submit the marked attendance now?")) return;
-        const submission = await DCLM_SYNC.submitManyOrQueue("attendance_queue", attendanceItems, { skipEditWarning: true });
-        haptic("success");
-        if (submission.queued) setTimeout(() => { window.location.href = "/queues"; }, 500);
-      });
+    presentListEl.replaceChildren();
+    for (const worker of marked) {
+      const row = document.createElement("div");
+      row.className = "d-flex justify-content-between align-items-center p-2 bg-white rounded-3 border";
+      const info = document.createElement("div");
+      const name = document.createElement("div");
+      name.className = "fw-bold text-dark small";
+      name.textContent = safeUiText(worker.name || "Church Worker");
+      const details = document.createElement("div");
+      details.className = "text-muted";
+      details.style.fontSize = "0.75rem";
+      details.textContent = safeUiText(`${worker.phone || ""} · ${worker.unit || "Worker"}`);
+      info.append(name, details);
+      const badge = document.createElement("span");
+      badge.className = "badge bg-success-subtle text-success rounded-pill px-3 py-1 small";
+      badge.textContent = "Present";
+      row.append(info, badge);
+      presentListEl.appendChild(row);
     }
   }
 
-  function initAttendanceBindings() {
+  async function submitAttendanceBatch() {
+    if (!isWorkerAttendanceProgram()) {
+      showToast("Attendance can only be submitted for worker or leader meetings, conferences, and retreats.", "warning");
+      return;
+    }
+    if (!activeSetup?.location_id || !activeSetup?.service_date || !activeSetup?.program_type
+        || (requiresScheduledEvent() && !activeSetup.event_id)) {
+      showToast(requiresScheduledEvent()
+        ? "Select the scheduled crusade event before reviewing attendance."
+        : "Complete service setup before reviewing attendance.", "warning");
+      return;
+    }
+    const contextKey = eventContextKey();
+    const roster = await DCLM_DB.getWorkerRoster(activeSetup.location_id, contextKey);
+    const marked = roster.filter((worker) => worker.marked_present);
+    if (!marked.length) {
+      showToast("No workers marked present to submit.", "warning");
+      haptic("warning");
+      return;
+    }
+
+    const submittedWorkers = await DCLM_DB.getAttendanceSubmittedWorkerIds(contextKey);
+    const attendanceItems = marked.filter((worker) => !submittedWorkers.has(String(worker.worker_id))).map((worker) => ({
+      client_id: generateUUID(),
+      location_id: activeSetup.location_id || worker.location_id,
+      event_id: activeSetup.event_id || null,
+      context_key: contextKey,
+      church_type: activeSetup.church_type,
+      program_domain: activeSetup.program_domain,
+      program_type: activeSetup.program_type,
+      service_date: activeSetup.service_date,
+      worker_id: worker.worker_id,
+      status: "present",
+      recorded_at: new Date().toISOString(),
+    }));
+    if (!attendanceItems.length) {
+      showToast("These workers already have attendance records queued or confirmed for this event.", "info");
+      return;
+    }
+    if (navigator.onLine && !window.confirm("Editing attendance after submission requires elevated approval. Submit the marked attendance now?")) return;
+
+    const submission = await DCLM_SYNC.submitManyOrQueue("attendance_queue", attendanceItems, { skipEditWarning: true });
+    const queuedWorkers = await DCLM_DB.getAttendancePendingWorkerIds(contextKey);
+    const confirmedWorkers = await DCLM_DB.getAttendanceSubmittedWorkerIds(contextKey);
+    cachedRoster = roster.map((worker) => {
+      const id = String(worker.worker_id);
+      worker.marked_present = false;
+      worker.attendance_submitted = confirmedWorkers.has(id);
+      worker.attendance_queued = queuedWorkers.has(id) && !worker.attendance_submitted;
+      return worker;
+    });
+    await Promise.all(roster.map((worker) => DCLM_DB.updateWorkerCheck(worker.worker_id, false, contextKey)));
+    renderWorkerRoster();
+    await renderAttendanceReview();
+    haptic("success");
+    showToast(submission.queued ? "Attendance saved on this device and queued for sync." : "Attendance submitted successfully. You can start a fresh attendance count.", submission.queued ? "warning" : "success");
+  }
+
+  function updateAttendanceSetupGate() {
     const allowed = isWorkerAttendanceProgram();
     const warning = qs("#attendance-setup-warning");
     if (warning) warning.classList.toggle("d-none", allowed);
+    const input = qs("#worker-search-input");
+    const refresh = qs("#btn-refresh-worker-roster");
+    const approve = qs("#btn-approve-attendance-batch");
+    if (input) input.disabled = !allowed;
+    if (refresh) refresh.disabled = !allowed;
+    if (approve) approve.disabled = !allowed;
     if (!allowed) {
-      const input = qs("#worker-search-input");
-      const refresh = qs("#btn-refresh-worker-roster");
-      if (input) input.disabled = true;
-      if (refresh) refresh.disabled = true;
-      const approve = qs("#btn-approve-attendance-batch");
-      if (approve) approve.disabled = true;
       const list = qs("#worker-roster-list");
       if (list) list.innerHTML = '<div class="text-warning text-center py-4 small">Choose a Workers Meeting, Leaders Meeting, or a worker/leader conference or retreat in Program Setup.</div>';
-      return;
     }
+    return allowed;
+  }
+
+  function initAttendanceBindings() {
+    const allowed = updateAttendanceSetupGate();
     const searchInput = qs("#worker-search-input");
     if (searchInput) {
       searchInput.addEventListener("input", renderWorkerRoster);
@@ -941,8 +1035,11 @@ const DCLM_APP = (function () {
         fetchLocationRoster(activeSetup.location_id);
       });
     }
+    qs("#btn-approve-attendance-batch")?.addEventListener("click", submitAttendanceBatch);
 
-    if (activeScreen === "fellowship") {
+    if (!allowed) {
+      // Setup can be changed from this page; listeners stay active and the gate updates immediately.
+    } else if (activeScreen === "fellowship") {
       // Fellowship reports use their own authorized fellowship ID and date.
     } else if (activeSetup && activeSetup.location_id && !window.location.pathname.endsWith("/review")) {
       fetchLocationRoster(activeSetup.location_id);
@@ -1076,7 +1173,7 @@ const DCLM_APP = (function () {
         select.replaceChildren(new Option(items.length ? "Choose your house fellowship" : "No fellowship is assigned to this location", ""));
         for (const fellowship of items) {
           const category = fellowship.fellowship_group_label || "Category not configured";
-          select.add(new Option(`${fellowship.name} · ${category}${fellowship.code ? ` · ${fellowship.code}` : ""}`, fellowship.fellowship_id));
+        select.add(new Option(safeUiText(`${fellowship.name} · ${category}${fellowship.code ? ` · ${fellowship.code}` : ""}`), fellowship.fellowship_id));
         }
       }
       const wrap = qs("#fellowship-content-wrap");
@@ -1195,7 +1292,7 @@ const DCLM_APP = (function () {
           <div class="dclm-queue-item type-count">
             <div>
               <div class="fw-bold text-dark small"><i class="bi bi-people-fill text-primary me-1"></i> Population Count (${Number(item.total || 0).toLocaleString()} Souls)</div>
-              <div class="small text-muted">${escapeHTML(item.program_type || "Church service")} ? ${escapeHTML(item.service_date)}</div>
+              <div class="small text-muted">${escapeHTML(item.program_type || "Church service")} · ${escapeHTML(item.service_date)}</div>
               ${item.last_error ? `<div class="small text-danger mt-1">Sync issue: ${escapeHTML(item.last_error)}</div>` : ""}
             </div>
             <div class="d-flex gap-2">
@@ -1276,7 +1373,7 @@ const DCLM_APP = (function () {
           <div class="d-flex justify-content-between align-items-center p-2 mb-2 bg-white rounded-3 border">
             <div>
               <div class="fw-bold text-dark small">${escapeHTML(r.type || "Batch Record")}</div>
-              <div class="text-muted" style="font-size: 0.75rem;">${new Date(r.synced_at).toLocaleTimeString()} • ${r.location_id || "Church"}</div>
+              <div class="text-muted" style="font-size: 0.75rem;">${new Date(r.synced_at).toLocaleTimeString()} • ${escapeHTML(displayLocationId(r.location_id))}</div>
             </div>
             <span class="badge bg-success text-white rounded-pill px-2 py-1 small">Synced</span>
           </div>
@@ -1363,8 +1460,29 @@ const DCLM_APP = (function () {
     if (userName) userName.textContent = user.name || "Field worker";
     if (userEmail) userEmail.textContent = user.email || "Not provided";
     if (userRole) userRole.textContent = (user.roles || []).join(", ") || "Field user";
-    if (userLocation) userLocation.textContent = user.location_id || "Not assigned";
+    if (userLocation) userLocation.textContent = displayLocationId(user.location_id);
     updateNetworkStatus();
+    refreshHapticsSetting();
+    qs("#setting-haptics-enabled")?.addEventListener("change", async (event) => {
+      await DCLM_DB.saveHapticsEnabled(event.currentTarget.checked);
+      await refreshHapticsSetting();
+      const didVibrate = haptic("tick");
+      if (event.currentTarget.checked && !didVibrate) {
+        const message = qs("#settings-haptics-status");
+        if (message) message.textContent = "Vibration is enabled, but the browser blocked it. Install/open the app on a supported device and allow vibration in device settings.";
+      }
+      showToast(event.currentTarget.checked ? "Touch vibration enabled." : "Touch vibration disabled.", "info");
+    });
+    qs("#btn-test-haptics")?.addEventListener("click", () => {
+      if (!window.__DCLM_HAPTICS_ENABLED__) {
+        showToast("Enable touch vibration first.", "info");
+        return;
+      }
+      if (!haptic("success")) {
+        const message = qs("#settings-haptics-status");
+        if (message) message.textContent = "The browser did not start vibration. Check device vibration settings, browser support, and that the app is open over HTTPS.";
+      }
+    });
     const modeSelect = qs("#submission-mode");
     if (modeSelect) {
       DCLM_DB.getSubmissionMode().then((mode) => { modeSelect.value = mode; });
@@ -1428,6 +1546,7 @@ const DCLM_APP = (function () {
     window.addEventListener("online", updateNetworkStatus);
     window.addEventListener("offline", updateNetworkStatus);
 
+    window.__DCLM_HAPTICS_ENABLED__ = await DCLM_DB.getHapticsEnabled();
     await refreshActiveSetup();
     initSetupBindings();
 

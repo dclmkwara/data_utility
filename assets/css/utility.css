@@ -134,6 +134,7 @@ body[data-auth-state="checking"] .dclm-mobile-frame { visibility: hidden; }
 .dclm-identity-bar > div,
 .dclm-identity-bar > div > div:first-child { min-width: 0; }
 .dclm-identity-bar > div > div:first-child { flex: 1 1 auto; }
+.dclm-identity-bar > div > div:first-child { flex-wrap: wrap; }
 .dclm-identity-bar > div > div:first-child > div:last-child { min-width: 0; flex: 1 1 auto; }
 .dclm-identity-bar #identity-bar-btn { flex: 0 0 auto; }
 .dclm-identity-bar .dclm-identity-val,
@@ -143,6 +144,8 @@ body[data-auth-state="checking"] .dclm-mobile-frame { visibility: hidden; }
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.dclm-identity-bar .dclm-identity-val,
+.dclm-identity-bar .dclm-identity-label { overflow-wrap: anywhere; white-space: normal; }
 
 .dclm-identity-bar:active {
   transform: scale(0.98);
@@ -487,6 +490,19 @@ body[data-auth-state="checking"] .dclm-mobile-frame { visibility: hidden; }
   border-color: var(--dclm-success);
   color: #ffffff;
 }
+.dclm-check-btn.is-submitted,
+.dclm-check-btn.is-queued {
+  width: auto;
+  min-width: 5.5rem;
+  padding: 0 0.55rem;
+  font-size: 0.7rem;
+  font-weight: 700;
+  color: #475569;
+  background: #e2e8f0;
+  border-color: #cbd5e1;
+  cursor: not-allowed;
+}
+.dclm-check-btn.is-queued { color: #92400e; background: #fef3c7; border-color: #fcd34d; }
 
 /* Offline Sync Status Pill */
 .dclm-status-pill {
@@ -688,6 +704,9 @@ body[data-auth-state="checking"] .dclm-mobile-frame { visibility: hidden; }
 .dclm-queue-item.type-offering   { border-left-color: var(--dclm-success); }
 .dclm-queue-item.type-attendance { border-left-color: #0ea5e9; }
 .dclm-queue-item.type-register   { border-left-color: #f59e0b; }
+.dclm-queue-item > div:first-child { min-width: 0; flex: 1 1 auto; overflow-wrap: anywhere; }
+.dclm-queue-item button { flex: 0 0 auto; }
+.dclm-queue-item .text-danger { overflow-wrap: anywhere; word-break: break-word; white-space: normal; }
 
 /* ── Setup Guard Shield ── */
 .dclm-shield-card {

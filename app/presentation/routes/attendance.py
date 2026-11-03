@@ -94,12 +94,14 @@ def setup_attendance_routes(app: Any) -> None:
                 Div(
                     Div(
                         Div(I(cls="bi bi-people-fill"), Span("Attendance Submission Review", cls="fw-bold"), cls="d-flex align-items-center gap-2"),
-                        Span("WORKERS & LEADERS", cls="badge text-bg-primary-subtle text-primary-emphasis rounded-pill px-3 py-2"),
-                        cls="d-flex justify-content-between align-items-center gap-2 mb-3"
+                        Span("WORKERS & LEADERS", cls="badge text-bg-primary-subtle text-primary-emphasis rounded-pill px-3 py-2 mt-2"),
+                        cls="mb-3"
                     ),
                     Div(
-                        Div(Span("Program", cls="text-muted small d-block"), Span("Not set", id="review-setup-scope", cls="fw-bold text-dark"), cls="attendance-review-program"),
-                        Div(Span("Location & date", cls="text-muted small d-block"), Span("Not set", id="review-setup-context", cls="small fw-semibold text-dark"), cls="attendance-review-context"),
+                        Div(Span("Program", cls="text-muted small d-block"), Span("Not set", id="review-setup-program", cls="fw-bold text-dark"), cls="attendance-review-program"),
+                        Div(Span("Location", cls="text-muted small d-block"), Span("Not set", id="review-setup-location", cls="small fw-semibold text-dark"), cls="attendance-review-context"),
+                        Div(Span("Location ID", cls="text-muted small d-block"), Span("Not set", id="review-setup-location-id", cls="small fw-semibold text-dark"), cls="attendance-review-context"),
+                        Div(Span("Program day", cls="text-muted small d-block"), Span("Not set", id="review-setup-day", cls="small fw-semibold text-dark"), cls="attendance-review-context"),
                         Div(Span("Present", cls="text-muted small d-block"), Span("0", id="review-present-count", cls="h3 fw-bold text-success mb-0"), cls="attendance-review-present"),
                         Div(Span("Roster", cls="text-muted small d-block"), Span("0", id="review-roster-count", cls="h5 fw-bold text-dark mb-0"), cls="attendance-review-roster"),
                         id="attendance-review-summary",

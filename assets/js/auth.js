@@ -10,6 +10,22 @@
     return fetch(path, { credentials: "same-origin", ...options });
   }
 
+  function userErrorMessage(value) {
+    let message = String(value || "Unable to complete this request. Please try again.");
+    try {
+      if (/^\s*[\[{]/.test(message)) {
+        const payload = JSON.parse(message);
+        message = payload.detail || payload.message || payload.msg || payload.error || "Unable to complete this request. Please try again.";
+        if (typeof message !== "string") message = message.msg || message.message || "Unable to complete this request. Please try again.";
+      }
+    } catch (_) {
+      message = "Unable to complete this request. Please try again.";
+    }
+    return String(message).replace(/Church_server/gi, "church records service")
+      .replace(/\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/gi, "record ID")
+      .slice(0, 320);
+  }
+
   async function apiFetch(path, options = {}, retry = true) {
     let response = await request(path, options);
     if (response.status === 401 && retry && path !== "/api/auth/refresh") {
@@ -51,8 +67,7 @@
       await saveOfflineUser(result.user);
       window.location.replace("/");
     } catch (error) {
-      errorBox.textContent = (error.message || "Unable to sign in. Check your connection and try again.")
-        .replace(/Church_server/gi, "church records service");
+      errorBox.textContent = userErrorMessage(error.message || "Unable to sign in. Check your connection and try again.");
       errorBox.classList.remove("d-none");
       button.disabled = false;
       button.textContent = "Sign in";

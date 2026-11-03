@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from typing import Any
-from fasthtml.common import A, Button, Div, H3, I, Label, Option, P, Select, Small, Span
+from fasthtml.common import A, Button, Div, H3, I, Input, Label, Option, P, Select, Small, Span
 from faststrap import Card, Col, Fx, Row
 
 from ..components.shell import app_shell
@@ -38,6 +38,16 @@ def setup_settings_routes(app: Any) -> None:
                 ),
                 Small("Instant mode sends records directly while online and saves them on this device if submission fails. Queue-first mode keeps them here until you submit from Sync Queues.",
                       id="submission-mode-help", cls="text-muted d-block mb-3"),
+                Div(
+                    Div(
+                        Div(Span("Touch vibration", cls="fw-semibold text-dark d-block"), Small("Haptic feedback for counts and attendance", cls="text-muted")),
+                        Input(type="checkbox", id="setting-haptics-enabled", role="switch", cls="form-check-input ms-3", aria_label="Enable touch vibration"),
+                        cls="d-flex align-items-center justify-content-between",
+                    ),
+                    Button("Test vibration", type="button", id="btn-test-haptics", cls="btn btn-sm btn-outline-primary rounded-pill mt-2"),
+                    Small("Checking vibration support...", id="settings-haptics-status", cls="text-muted d-block mt-2"),
+                    cls="p-3 bg-light rounded-3 mb-3",
+                ),
                 Div(
                     Span("Last successful sync", cls="text-muted small"),
                     Span("Not yet synced", id="settings-last-sync", cls="small fw-semibold text-dark d-block"),

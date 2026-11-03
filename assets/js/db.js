@@ -103,6 +103,21 @@ const DCLM_DB = (function () {
       return setting?.value === "queue_first" ? "queue_first" : "instant";
     },
 
+    async getHapticsEnabled() {
+      const ownerId = currentOwnerId();
+      if (!ownerId) return true;
+      const setting = await performTx("app_settings", "readonly", (store) => reqToPromise(store.get(`haptics:${ownerId}`)));
+      return setting?.value !== false;
+    },
+
+    async saveHapticsEnabled(value) {
+      const ownerId = currentOwnerId();
+      if (!ownerId) throw new Error("Sign in before changing touch feedback preferences.");
+      return performTx("app_settings", "readwrite", (store) => reqToPromise(store.put({
+        key: `haptics:${ownerId}`, owner_id: ownerId, value: Boolean(value), updated_at: new Date().toISOString(),
+      })));
+    },
+
     async saveSubmissionMode(value) {
       const ownerId = currentOwnerId();
       if (!ownerId) throw new Error("Sign in before changing submission preferences.");
@@ -222,14 +237,21 @@ const DCLM_DB = (function () {
     },
 
     async getAttendanceSubmittedWorkerIds(eventId) {
-      const [pending, recent, confirmed] = await Promise.all([
-        this.getAllFromQueue("attendance_queue"),
+      const [recent, confirmed] = await Promise.all([
         this.getAllFromQueue("recent_submissions"),
         this.getAllFromQueue("attendance_confirmed"),
       ]);
-      return new Set([...pending, ...recent, ...confirmed]
+      return new Set([...recent, ...confirmed]
         .filter((item) => String(item.context_key || item.event_id || "") === String(eventId)
           && (item.type === undefined || item.type === "Attendance"))
+        .map((item) => String(item.worker_id || ""))
+        .filter(Boolean));
+    },
+
+    async getAttendancePendingWorkerIds(eventId) {
+      const pending = await this.getAllFromQueue("attendance_queue");
+      return new Set(pending
+        .filter((item) => String(item.context_key || item.event_id || "") === String(eventId))
         .map((item) => String(item.worker_id || ""))
         .filter(Boolean));
     },

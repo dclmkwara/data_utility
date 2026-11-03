@@ -18,7 +18,7 @@ def setup_queue_routes(app: Any) -> None:
             Div(
                 Div(
                     H3("Offline Sync Manager", cls="h6 fw-bold text-white mb-1"),
-                    P("Batches are stored securely in IndexedDB until pushed to the church cloud server.", cls="text-white-50 small mb-0"),
+                P("Saved records stay on this device until they are submitted to the church records service.", cls="text-white-50 small mb-0"),
                 ),
                 Button(
                     I(cls="bi bi-cloud-arrow-up-fill me-2"), "Sync All Pending to Cloud",

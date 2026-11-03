@@ -92,46 +92,37 @@ def setup_counter_routes(app: Any) -> None:
         offering_card = Card(
             Div(
                 H3("Tithe & Offering Collection", cls="h6 fw-bold text-dark mb-2"),
-                Row(
-                    Col(
-                        Select(
-                            Option("Select collection type", value="", selected=True),
-                            *[Option(label, value=key) for key, label in FUND_TYPES],
-                            id="offering-fund-type",
-                            cls="form-select rounded-3",
-                            aria_label="Collection type",
-                            required=True,
-                        ),
-                        cols=12, cls="mb-2"
+                Div(
+                    Select(
+                        Option("Select collection type", value="", selected=True),
+                        *[Option(label, value=key) for key, label in FUND_TYPES],
+                        id="offering-fund-type",
+                        cls="form-select rounded-3",
+                        aria_label="Collection type",
+                        required=True,
                     ),
-                    Col(
-                        Select(
-                            *[Option(label, value=key) for key, label in PAYMENT_METHODS],
-                            id="offering-payment-method",
-                            cls="form-select rounded-3",
-                            aria_label="Payment type",
-                        ),
-                        cols=12, cls="mb-2"
+                    Select(
+                        *[Option(label, value=key) for key, label in PAYMENT_METHODS],
+                        id="offering-payment-method",
+                        cls="form-select rounded-3",
+                        aria_label="Payment type",
                     ),
-                    Col(
-                        Div(
-                            Span("NGN", cls="input-group-text bg-light fw-bold text-success border-end-0"),
-                            Input(id="offering-amount-input", type="number", step="0.01", min="0", max="9999999999.99",
-                                  placeholder="Amount", cls="form-control border-start-0 font-monospace fw-bold"),
-                            cls="input-group"
-                        ),
-                        cols=12, cls="mb-2"
+                    Div(
+                        Span("NGN", cls="input-group-text bg-light fw-bold text-success border-end-0"),
+                        Input(id="offering-amount-input", type="number", step="0.01", min="0", max="9999999999.99",
+                              placeholder="Amount", cls="form-control border-start-0 font-monospace fw-bold"),
+                        cls="input-group"
                     ),
-                    Col(
+                    Div(
                         Button(
                             "Save ", I(cls="bi bi-wallet2"),
                             type="button",
                             id="btn-submit-offering",
                             cls="btn btn-success rounded-pill px-4 py-2 fw-semibold d-flex align-items-center gap-2 ms-auto"
                         ),
-                        cols=12, cls="d-flex justify-content-end"
+                        cls="d-flex justify-content-end"
                     ),
-                    cls="g-2"
+                    cls="d-grid gap-2"
                 ),
             ),
             cls="dclm-card mb-3"

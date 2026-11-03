@@ -15,27 +15,27 @@ const DCLM_HAPTICS = (function () {
   return {
     /** Rapid click tick for incrementing counts */
     tick() {
-      vibrate(18);
+      return vibrate(18);
     },
 
     /** Milestone pulse (every 50 or 100 counts) */
     milestone() {
-      vibrate([25, 40, 25]);
+      return vibrate([25, 40, 25]);
     },
 
     /** Success confirmation pulse */
     success() {
-      vibrate([30, 60, 30]);
+      return vibrate([30, 60, 30]);
     },
 
     /** Caution or reset pulse */
     warning() {
-      vibrate([60, 40, 60]);
+      return vibrate([60, 40, 60]);
     },
 
     /** Error buzz */
     error() {
-      vibrate([100, 50, 100]);
+      return vibrate([100, 50, 100]);
     },
   };
 })();
