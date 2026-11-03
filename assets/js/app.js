@@ -74,6 +74,27 @@ const DCLM_APP = (function () {
     return Array.from(scope.querySelectorAll(selector));
   }
 
+  async function runButtonAction(button, busyLabel, action) {
+    if (!button || button.disabled || button.dataset.busy === "true") return null;
+    const originalHtml = button.innerHTML;
+    const wasDisabled = button.disabled;
+    button.disabled = true;
+    button.dataset.busy = "true";
+    button.setAttribute("aria-busy", "true");
+    button.innerHTML = `<span class="spinner-border spinner-border-sm me-2" aria-hidden="true"></span><span>${escapeHTML(busyLabel)}</span>`;
+    try {
+      return await action();
+    } catch (error) {
+      showToast(safeUiText(error?.message || "The request could not be completed. Please try again."), "danger");
+      return null;
+    } finally {
+      button.innerHTML = originalHtml;
+      button.disabled = wasDisabled;
+      delete button.dataset.busy;
+      button.removeAttribute("aria-busy");
+    }
+  }
+
   function haptic(effect) {
     if (window.__DCLM_HAPTICS_ENABLED__ === false) return false;
     if (typeof DCLM_HAPTICS !== "undefined" && typeof DCLM_HAPTICS[effect] === "function") {
@@ -515,7 +536,7 @@ const DCLM_APP = (function () {
     // Modal save
     const modalSaveBtn = qs("#btn-save-modal-setup");
     if (modalSaveBtn) {
-      modalSaveBtn.addEventListener("click", async () => {
+      modalSaveBtn.addEventListener("click", () => runButtonAction(modalSaveBtn, "Saving...", async () => {
         const success = await handleSaveSetup({
           church_type: qs("#modal_church_type")?.value || assignedLocation?.church_type || "DCLM",
           program_domain: qs("#modal_program_domain")?.value,
@@ -533,13 +554,13 @@ const DCLM_APP = (function () {
             if (instance) instance.hide();
           }
         }
-      });
+      }));
     }
 
     // Page save
     const pageSaveBtn = qs("#btn-save-page-setup");
     if (pageSaveBtn) {
-      pageSaveBtn.addEventListener("click", async () => {
+      pageSaveBtn.addEventListener("click", () => runButtonAction(pageSaveBtn, "Saving...", async () => {
         const success = await handleSaveSetup({
           church_type: qs("#page_church_type")?.value || assignedLocation?.church_type || "DCLM",
           program_domain: qs("#page_program_domain")?.value,
@@ -553,7 +574,7 @@ const DCLM_APP = (function () {
         if (success) {
           setTimeout(() => { window.location.href = "/"; }, 400);
         }
-      });
+      }));
     }
 
     // Populate modal inputs if setup already exists
@@ -747,8 +768,10 @@ const DCLM_APP = (function () {
           service_date: activeSetup.service_date,
         };
 
-        const result = await DCLM_SYNC.submitOrQueue("offerings_queue", item);
+        const result = await runButtonAction(offeringSubmitBtn, "Saving...", () => DCLM_SYNC.submitOrQueue("offerings_queue", item));
+        if (!result) return;
         if (result.cancelled) return;
+        if (!result.submitted && !result.queued) return;
         haptic("success");
         if (amountInput) amountInput.value = "";
       });
@@ -800,8 +823,10 @@ const DCLM_APP = (function () {
           service_date: activeSetup.service_date,
         };
 
-        const result = await DCLM_SYNC.submitOrQueue("counts_queue", batch);
+        const result = await runButtonAction(finalizeCountBtn, "Saving...", () => DCLM_SYNC.submitOrQueue("counts_queue", batch));
+        if (!result) return;
         if (result.cancelled) return;
+        if (!result.submitted && !result.queued) return;
         await DCLM_DB.clearCountDraft();
         haptic("success");
 
@@ -1035,7 +1060,11 @@ const DCLM_APP = (function () {
     }
     if (navigator.onLine && !(await confirm("Editing attendance after submission requires elevated approval. Submit the marked attendance now?", { title: "Submit workers attendance", confirmLabel: "Submit" }))) return;
 
-    const submission = await DCLM_SYNC.submitManyOrQueue("attendance_queue", attendanceItems, { skipEditWarning: true });
+    const submitButton = qs("#btn-approve-attendance-batch");
+    const submission = await runButtonAction(submitButton, "Submitting...", () =>
+      DCLM_SYNC.submitManyOrQueue("attendance_queue", attendanceItems, { skipEditWarning: true }));
+    if (!submission) return;
+    if (!submission.submitted && !submission.queued) return;
     const queuedWorkers = await DCLM_DB.getAttendancePendingWorkerIds(contextKey);
     const confirmedWorkers = await DCLM_DB.getAttendanceSubmittedWorkerIds(contextKey);
     cachedRoster = roster.map((worker) => {
@@ -1090,7 +1119,7 @@ const DCLM_APP = (function () {
     const refreshRosterBtn = qs("#btn-refresh-worker-roster");
     if (refreshRosterBtn && activeSetup) {
       refreshRosterBtn.addEventListener("click", () => {
-        fetchLocationRoster(activeSetup.location_id);
+        void runButtonAction(refreshRosterBtn, "Refreshing...", () => fetchLocationRoster(activeSetup.location_id));
       });
     }
     qs("#btn-approve-attendance-batch")?.addEventListener("click", submitAttendanceBatch);
@@ -1198,10 +1227,11 @@ const DCLM_APP = (function () {
           captured_at: new Date().toISOString(),
         };
 
-        regSubmitBtn.disabled = true;
         try {
-          const result = await DCLM_SYNC.submitOrQueue("registration_queue", record);
+          const result = await runButtonAction(regSubmitBtn, "Saving...", () => DCLM_SYNC.submitOrQueue("registration_queue", record));
+          if (!result) return;
           if (result.cancelled) return;
+          if (!result.submitted && !result.queued) return;
           haptic("success");
           qs("#registration-entry-form")?.reset();
           if (recordTypeInput) recordTypeInput.value = "convert";
@@ -1209,11 +1239,7 @@ const DCLM_APP = (function () {
             convertBtn.className = "btn btn-primary w-100 rounded-pill py-2 fw-semibold";
             newcomerBtn.className = "btn btn-outline-secondary w-100 rounded-pill py-2 fw-semibold";
           }
-        } catch (error) {
-          showToast(`Could not save this registration: ${error.message}`, "danger");
-        } finally {
-          regSubmitBtn.disabled = false;
-        }
+        } catch (error) { showToast(`Could not save this registration: ${safeUiText(error.message)}`, "danger"); }
       });
     }
   }
@@ -1279,22 +1305,25 @@ const DCLM_APP = (function () {
       });
     };
 
-    qs("#btn-save-fellowship-attendance")?.addEventListener("click", async () => {
+    const attendanceSaveButton = qs("#btn-save-fellowship-attendance");
+    attendanceSaveButton?.addEventListener("click", async () => {
       const values = Object.fromEntries(["men", "women", "youths", "children"].map((key) => [key, qs(`#fellowship_${key}`)?.value || "0"]));
       if (Object.values(values).some((value) => !/^\d{1,6}$/.test(value))) { showToast("Attendance categories must be whole numbers from 0 to 999999.", "warning"); return; }
       const date = qs("#fellowship_attendance_date")?.value;
       if (!date) { showToast("Choose the meeting date.", "warning"); return; }
-      await save("fellowship_attendance_queue", { ...values, date, topic: qs("#fellowship_topic")?.value.trim() || null });
+      await runButtonAction(attendanceSaveButton, "Saving...", () => save("fellowship_attendance_queue", { ...values, date, topic: qs("#fellowship_topic")?.value.trim() || null }));
     });
-    qs("#btn-save-fellowship-offering")?.addEventListener("click", async () => {
+    const offeringSaveButton = qs("#btn-save-fellowship-offering");
+    offeringSaveButton?.addEventListener("click", async () => {
       const amount = qs("#fellowship_offering_amount")?.value.trim() || "";
       const date = qs("#fellowship_offering_date")?.value;
       if (!/^\d{1,10}(?:\.\d{1,2})?$/.test(amount) || Number(amount) <= 0) { showToast("Enter a positive amount with up to two decimal places.", "warning"); return; }
       if (!date) { showToast("Choose the meeting date.", "warning"); return; }
-      await save("fellowship_offerings_queue", { amount, date, note: qs("#fellowship_offering_note")?.value.trim() || null });
-      qs("#fellowship_offering_amount").value = "";
+      const result = await runButtonAction(offeringSaveButton, "Saving...", () => save("fellowship_offerings_queue", { amount, date, note: qs("#fellowship_offering_note")?.value.trim() || null }));
+      if (result && (result.submitted || result.queued)) qs("#fellowship_offering_amount").value = "";
     });
-    qs("#btn-save-fellowship-member")?.addEventListener("click", async () => {
+    const memberSaveButton = qs("#btn-save-fellowship-member");
+    memberSaveButton?.addEventListener("click", async () => {
       const name = qs("#fellowship_member_name")?.value.trim() || "";
       const phone = qs("#fellowship_member_phone")?.value.trim() || "";
       const address = qs("#fellowship_member_address")?.value.trim() || "";
@@ -1302,8 +1331,8 @@ const DCLM_APP = (function () {
         showToast("Enter the member name and home address (up to 300 characters); phone must be 30 characters or fewer.", "warning");
         return;
       }
-      const result = await save("fellowship_members_queue", { name, phone: phone || null, address });
-      if (result === false) return;
+      const result = await runButtonAction(memberSaveButton, "Saving...", () => save("fellowship_members_queue", { name, phone: phone || null, address }));
+      if (!result || (!result.submitted && !result.queued)) return;
       qs("#fellowship_member_name").value = "";
       qs("#fellowship_member_phone").value = "";
       qs("#fellowship_member_address").value = "";
@@ -1354,8 +1383,9 @@ const DCLM_APP = (function () {
               ${item.last_error ? `<div class="small text-danger mt-1">Sync issue: ${escapeHTML(item.last_error)}</div>` : ""}
             </div>
             <div class="d-flex gap-2">
-              <button class="btn btn-sm btn-outline-primary rounded-pill px-3" data-edit-count-id="${escapeHTML(item.client_id)}">Edit</button>
-              <button class="btn btn-sm btn-outline-danger rounded-pill px-3" data-discard-store="counts_queue" data-discard-id="${escapeHTML(item.client_id)}">Discard</button>
+              <button type="button" class="btn btn-sm btn-outline-primary rounded-pill px-3" data-edit-count-id="${escapeHTML(item.client_id)}">Edit</button>
+              <button type="button" class="btn btn-sm btn-primary rounded-pill px-3" data-sync-store="counts_queue" data-sync-id="${escapeHTML(item.client_id)}">Sync</button>
+              <button type="button" class="btn btn-sm btn-outline-danger rounded-pill px-3" data-discard-store="counts_queue" data-discard-id="${escapeHTML(item.client_id)}">Discard</button>
             </div>
           </div>
         `;
@@ -1369,7 +1399,7 @@ const DCLM_APP = (function () {
               <div class="small text-muted">${escapeHTML(item.fund_type)} via ${escapeHTML(item.payment_method)}</div>
               ${item.last_error ? `<div class="small text-danger mt-1">Sync issue: ${escapeHTML(item.last_error)}</div>` : ""}
             </div>
-          <button class="btn btn-sm btn-outline-danger rounded-pill px-3" data-discard-store="offerings_queue" data-discard-id="${escapeHTML(item.client_id)}">Discard</button>
+          <div class="d-flex gap-2"><button type="button" class="btn btn-sm btn-primary rounded-pill px-3" data-sync-store="offerings_queue" data-sync-id="${escapeHTML(item.client_id)}">Sync</button><button type="button" class="btn btn-sm btn-outline-danger rounded-pill px-3" data-discard-store="offerings_queue" data-discard-id="${escapeHTML(item.client_id)}">Discard</button></div>
           </div>
         `;
       });
@@ -1395,7 +1425,7 @@ const DCLM_APP = (function () {
               <div class="small text-muted">${escapeHTML(item.phone)} • ${escapeHTML(item.details?.salvation_type || "Follow-up")}</div>
               ${item.last_error ? `<div class="small text-danger mt-1">Sync issue: ${escapeHTML(item.last_error)}</div>` : ""}
             </div>
-            <button class="btn btn-sm btn-outline-danger rounded-pill px-3" data-discard-store="registration_queue" data-discard-id="${escapeHTML(item.client_id)}">Discard</button>
+            <div class="d-flex gap-2"><button type="button" class="btn btn-sm btn-primary rounded-pill px-3" data-sync-store="registration_queue" data-sync-id="${escapeHTML(item.client_id)}">Sync</button><button type="button" class="btn btn-sm btn-outline-danger rounded-pill px-3" data-discard-store="registration_queue" data-discard-id="${escapeHTML(item.client_id)}">Discard</button></div>
           </div>
         `;
       });
@@ -1410,30 +1440,11 @@ const DCLM_APP = (function () {
           const detail = store === "fellowship_attendance_queue"
             ? `${Number(item.men) + Number(item.women) + Number(item.youths) + Number(item.children)} people · ${item.date}`
             : store === "fellowship_offerings_queue" ? `₦${Number(item.amount).toLocaleString()} · ${item.date}` : escapeHTML(item.name);
-          html += `<div class="dclm-queue-item type-attendance"><div><div class="fw-bold text-dark small"><i class="bi bi-house-heart text-primary me-1"></i>${label}</div><div class="small text-muted">${escapeHTML(item.fellowship_name || "House Fellowship")} · ${detail}</div>${item.last_error ? `<div class="small text-danger mt-1">Sync issue: ${escapeHTML(item.last_error)}</div>` : ""}</div><button class="btn btn-sm btn-outline-danger rounded-pill px-3" data-discard-store="${store}" data-discard-id="${escapeHTML(item.client_id)}">Discard</button></div>`;
+          html += `<div class="dclm-queue-item type-attendance"><div><div class="fw-bold text-dark small"><i class="bi bi-house-heart text-primary me-1"></i>${label}</div><div class="small text-muted">${escapeHTML(item.fellowship_name || "House Fellowship")} | ${detail}</div>${item.last_error ? `<div class="small text-danger mt-1">Sync issue: ${escapeHTML(item.last_error)}</div>` : ""}</div><div class="d-flex gap-2"><button type="button" class="btn btn-sm btn-primary rounded-pill px-3" data-sync-store="${store}" data-sync-id="${escapeHTML(item.client_id)}">Sync</button><button type="button" class="btn btn-sm btn-outline-danger rounded-pill px-3" data-discard-store="${store}" data-discard-id="${escapeHTML(item.client_id)}">Discard</button></div></div>`;
         });
       }
 
       listEl.innerHTML = html;
-      listEl.querySelectorAll("[data-discard-store]").forEach((discardButton) => {
-        const card = discardButton.closest(".dclm-queue-item");
-        if (!card || card.querySelector("[data-sync-store]")) return;
-        let actions = discardButton.parentElement?.parentElement === card && discardButton.parentElement.classList.contains("d-flex")
-          ? discardButton.parentElement : null;
-        if (!actions) {
-          actions = document.createElement("div");
-          actions.className = "d-flex gap-2";
-          card.querySelectorAll(":scope > button").forEach((button) => actions.appendChild(button));
-          card.appendChild(actions);
-        }
-        const syncButton = document.createElement("button");
-        syncButton.type = "button";
-        syncButton.className = "btn btn-sm btn-primary rounded-pill px-3";
-        syncButton.textContent = "Sync";
-        syncButton.dataset.syncStore = discardButton.dataset.discardStore;
-        syncButton.dataset.syncId = discardButton.dataset.discardId;
-        discardButton.before(syncButton);
-      });
     }
 
     // Render Recent Synced History
@@ -1463,75 +1474,92 @@ const DCLM_APP = (function () {
     const listEl = qs("#pending-queue-list");
     let editingCount = null;
     listEl?.addEventListener("click", (event) => {
-      const syncButton = event.target.closest("[data-sync-store]");
+      const target = event.target instanceof Element ? event.target : event.target?.parentElement;
+      const syncButton = target?.closest("[data-sync-store]");
       if (syncButton) {
-        const button = syncButton;
-        button.disabled = true;
-        button.textContent = "Syncing…";
-        DCLM_SYNC.syncQueueItem(button.dataset.syncStore, button.dataset.syncId)
-          .finally(() => renderQueuesView());
+        event.preventDefault();
+        void runButtonAction(syncButton, "Syncing...", async () => {
+          await DCLM_SYNC.syncQueueItem(syncButton.dataset.syncStore, syncButton.dataset.syncId);
+          await renderQueuesView();
+          await refreshHomeQueueSummary();
+        });
         return;
       }
-      const editCount = event.target.closest("[data-edit-count-id]");
+      const editCount = target?.closest("[data-edit-count-id]");
       if (editCount) {
-        DCLM_DB.getAllFromQueue("counts_queue").then((items) => {
+        event.preventDefault();
+        void runButtonAction(editCount, "Opening...", async () => {
+          const items = await DCLM_DB.getAllFromQueue("counts_queue");
           editingCount = items.find((item) => String(item.client_id) === String(editCount.dataset.editCountId));
-          if (!editingCount) return;
+          if (!editingCount) {
+            showToast("This saved population count is no longer available. Refresh the queue and try again.", "warning");
+            await renderQueuesView();
+            return;
+          }
           ["adult_male", "adult_female", "youth_male", "youth_female", "boys", "girls"].forEach((key) => {
             const input = qs(`#queued_edit_${key}`);
             if (input) input.value = Number(editingCount[key] || 0);
           });
-          if (typeof bootstrap !== "undefined") bootstrap.Modal.getOrCreateInstance(qs("#queuedCountEditModal")).show();
+          const modalElement = qs("#queuedCountEditModal");
+          if (!modalElement || typeof bootstrap === "undefined") throw new Error("The count editor could not open. Reload this page and try again.");
+          bootstrap.Modal.getOrCreateInstance(modalElement).show();
         });
         return;
       }
-      const discard = event.target.closest("[data-discard-store]");
+      const discard = target?.closest("[data-discard-store]");
       if (discard) {
-        window.DCLM_APP.discardQueueItem(discard.dataset.discardStore, discard.dataset.discardId);
-      } else if (event.target.closest("[data-discard-attendance]")) {
-        window.DCLM_APP.discardAllAttendance();
+        event.preventDefault();
+        void runButtonAction(discard, "Discarding...", () =>
+          DCLM_APP.discardQueueItem(discard.dataset.discardStore, discard.dataset.discardId));
+        return;
       }
+      if (target?.closest("[data-discard-attendance]")) DCLM_APP.discardAllAttendance();
     });
 
-    qs("#btn-save-queued-count")?.addEventListener("click", async () => {
-      if (!editingCount) return;
-      const keys = ["adult_male", "adult_female", "youth_male", "youth_female", "boys", "girls"];
-      const values = Object.fromEntries(keys.map((key) => [key, Number(qs(`#queued_edit_${key}`)?.value || 0)]));
-      if (Object.values(values).some((value) => !Number.isInteger(value) || value < 0 || value > 999999)) {
-        showToast("Use whole number counts from 0 to 999999 in each category.", "warning");
-        return;
-      }
-      const total = Object.values(values).reduce((sum, value) => sum + value, 0);
-      if (total <= 0) {
-        showToast("A population count must contain at least one person.", "warning");
-        return;
-      }
-      await DCLM_DB.updateQueueItems("counts_queue", [{
-        ...editingCount, ...values, total, status: "pending", last_error: null, updated_at: new Date().toISOString(),
-      }]);
-      editingCount = null;
-      if (typeof bootstrap !== "undefined") bootstrap.Modal.getInstance(qs("#queuedCountEditModal"))?.hide();
-      showToast("Pending population count updated.", "success");
-      await renderQueuesView();
-      await refreshHomeQueueSummary();
+    qs("#btn-save-queued-count")?.addEventListener("click", async (event) => {
+      const button = event.currentTarget;
+      await runButtonAction(button, "Saving...", async () => {
+        if (!editingCount) return;
+        const keys = ["adult_male", "adult_female", "youth_male", "youth_female", "boys", "girls"];
+        const values = Object.fromEntries(keys.map((key) => [key, Number(qs(`#queued_edit_${key}`)?.value || 0)]));
+        if (Object.values(values).some((value) => !Number.isInteger(value) || value < 0 || value > 999999)) {
+          showToast("Use whole number counts from 0 to 999999 in each category.", "warning");
+          return;
+        }
+        const total = Object.values(values).reduce((sum, value) => sum + value, 0);
+        if (total <= 0) {
+          showToast("A population count must contain at least one person.", "warning");
+          return;
+        }
+        await DCLM_DB.updateQueueItems("counts_queue", [{
+          ...editingCount, ...values, total, status: "pending", last_error: null, updated_at: new Date().toISOString(),
+        }]);
+        editingCount = null;
+        if (typeof bootstrap !== "undefined") bootstrap.Modal.getInstance(qs("#queuedCountEditModal"))?.hide();
+        showToast("Pending population count updated.", "success");
+        await renderQueuesView();
+        await refreshHomeQueueSummary();
+      });
     });
 
     const syncAllBtn = qs("#btn-sync-all-queues");
-    if (syncAllBtn) {
-      syncAllBtn.addEventListener("click", () => {
-        DCLM_SYNC.syncAllQueues();
-      });
-    }
-
-    qs("#btn-claim-legacy-queues")?.addEventListener("click", async () => {
-      const count = await DCLM_DB.getUnassignedQueueCount();
-      if (!count || !(await confirm(`Assign ${count} older saved record(s) to ${window.DCLM_CURRENT_USER?.name || "your account"}?`, { title: "Claim older records", confirmLabel: "Claim" }))) return;
-      const claimed = await DCLM_DB.claimUnassignedQueueItems();
-      showToast(`${claimed} older record(s) assigned to your account.`, "success");
-      await renderQueuesView();
+    syncAllBtn?.addEventListener("click", (event) => {
+      event.preventDefault();
+      void runButtonAction(syncAllBtn, "Syncing...", () => DCLM_SYNC.syncAllQueues());
     });
 
-    renderQueuesView();
+    qs("#btn-claim-legacy-queues")?.addEventListener("click", async (event) => {
+      const button = event.currentTarget;
+      await runButtonAction(button, "Claiming...", async () => {
+        const count = await DCLM_DB.getUnassignedQueueCount();
+        if (!count || !(await confirm(`Assign ${count} older saved record(s) to ${window.DCLM_CURRENT_USER?.name || "your account"}?`, { title: "Claim older records", confirmLabel: "Claim" }))) return;
+        const claimed = await DCLM_DB.claimUnassignedQueueItems();
+        showToast(`${claimed} older record(s) assigned to your account.`, "success");
+        await renderQueuesView();
+      });
+    });
+
+    void renderQueuesView();
   }
 
   // -------------------------------------------------------------
@@ -1675,12 +1703,18 @@ const DCLM_APP = (function () {
     refreshHomeQueueSummary,
     renderQueuesView,
     async discardQueueItem(storeName, key) {
-      if (await confirm("Discard this unsubmitted item?", { title: "Discard saved record", confirmLabel: "Discard", danger: true })) {
-        await DCLM_DB.removeFromQueue(storeName, key);
-        renderQueuesView();
-        await refreshHomeQueueSummary();
-        showToast("Item discarded.", "info");
+      const approved = await confirm("Discard this unsubmitted item?", { title: "Discard saved record", confirmLabel: "Discard", danger: true });
+      if (!approved) return false;
+      const removed = await DCLM_DB.removeFromQueue(storeName, key);
+      if (!removed) {
+        showToast("This saved item was not found on this device. Refresh the queue and try again.", "warning");
+        await renderQueuesView();
+        return false;
       }
+      await renderQueuesView();
+      await refreshHomeQueueSummary();
+      showToast("Item discarded.", "info");
+      return true;
     },
     async discardAllAttendance() {
       if (await confirm("Discard all unsubmitted attendance records?", { title: "Discard attendance records", confirmLabel: "Discard all", danger: true })) {
@@ -1692,3 +1726,6 @@ const DCLM_APP = (function () {
     },
   };
 })();
+
+// sync.js calls the public confirmation and post-sync hooks through window.
+window.DCLM_APP = DCLM_APP;
