@@ -214,6 +214,12 @@ def setup_api_proxy_routes(app: Any) -> None:
                          "formatted_id": location.get("formatted_id") or location.get("location_code")},
             "items": [{"fellowship_id": str(item.get("fellowship_id") or item.get("id") or ""),
                        "name": str(item.get("fellowship_name") or item.get("name") or "House Fellowship"),
+                       "fellowship_group": str(item.get("fellowship_group") or ""),
+                       "fellowship_group_label": {
+                           "adult": "Adult Fellowship", "young_adult": "Young Adult Fellowship",
+                           "campus": "Campus Fellowship", "youth": "Youth Fellowship",
+                           "children": "Children Fellowship",
+                       }.get(str(item.get("fellowship_group") or ""), "Category not configured"),
                        "code": str(item.get("fellowship_code") or "")} for item in fellowships],
         })
 
@@ -317,8 +323,6 @@ def setup_api_proxy_routes(app: Any) -> None:
                     if (not name or len(name) > 120 or len(str(item.get("phone") or "")) > 30
                             or not address or len(address) > 300):
                         return JSONResponse({"ok": False, "error": f"fellowship_members[{index}] requires a valid name and home address; phone must be 30 characters or fewer."}, status_code=422)
-                    if item.get("fellowship_group") not in {"adult", "young_adult", "campus", "youth", "children"}:
-                        return JSONResponse({"ok": False, "error": f"fellowship_members[{index}] requires a valid fellowship group."}, status_code=422)
                 if resource_name == "fellowship_offerings":
                     try:
                         amount = float(item.get("amount"))
@@ -328,12 +332,23 @@ def setup_api_proxy_routes(app: Any) -> None:
                         return JSONResponse({"ok": False, "error": f"fellowship_offerings[{index}] requires a positive amount."}, status_code=422)
         if total > 500:
             return JSONResponse({"ok": False, "error": "Sync accepts at most 500 records per request. Retry in smaller batches."}, status_code=413)
+        refreshed_cookie = None
         try:
             result = await backend_client.push_sync_batch(body, session["access_token"])
+            if int(result.get("status_code", 0)) == 401:
+                tokens = await backend_client.refresh(session["refresh_token"])
+                user = await backend_client.get_current_user(str(tokens["access_token"]))
+                result = await backend_client.push_sync_batch(body, str(tokens["access_token"]))
+                refreshed_cookie = encode_session(
+                    str(tokens["access_token"]), str(tokens["refresh_token"]), _actor_payload(user)
+                )
         except Exception as exc:
             return _response_error(exc)
         status_code = int(result.get("status_code", 200 if result.get("ok") else 502))
-        return JSONResponse(result, status_code=status_code)
+        response = JSONResponse(result, status_code=status_code)
+        if refreshed_cookie:
+            set_session_cookie(response, refreshed_cookie)
+        return response
 
     @app.get("/api/validate-location")
     def validate_location(level: str = "", location_id: str = ""):

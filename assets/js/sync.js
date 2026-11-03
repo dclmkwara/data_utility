@@ -10,11 +10,94 @@ const DCLM_SYNC = (function () {
     ["fellowship_offerings_queue", "fellowship_offerings", "Fellowship Offering"],
   ];
 
+  const groupForStore = (store) => {
+    const [queue, field, label] = QUEUES.find(([name]) => name === store) || [];
+    return queue ? { store: queue, field, label } : null;
+  };
+
+  async function postMany(group, items) {
+    const payload = Object.fromEntries(QUEUES.map(([, field]) => [field, []]));
+    payload[group.field].push(...items.map((item) => payloadFor(group, item)));
+    const response = await window.DCLM_AUTH.apiFetch("/api/sync", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    const result = await response.json();
+    if (!response.ok || result.ok === false) throw new Error(result.error || `Server rejected submission (${response.status}).`);
+    return result[group.field]?.details || [];
+  }
+
+  async function rememberConfirmed(group, item, outcome) {
+    const now = new Date().toISOString();
+    if (group.field === "worker_attendance") {
+      await DCLM_DB.confirmAttendance(item.worker_id, item.context_key || item.event_id);
+    }
+    await DCLM_DB.addToQueue("recent_submissions", {
+      client_id: item.client_id, type: group.label, synced_at: now, outcome,
+      location_id: item.location_id, service_date: item.service_date || null,
+      event_id: item.event_id, context_key: item.context_key || null, worker_id: item.worker_id || null,
+    });
+    await DCLM_DB.pruneRecentSubmissions();
+  }
+
+  async function submitOrQueue(store, item, { skipEditWarning = false } = {}) {
+    const result = await submitManyOrQueue(store, [item], { skipEditWarning });
+    return { ...result, queued: result.queued > 0, submitted: result.submitted > 0 };
+  }
+
+  async function submitManyOrQueue(store, items, { skipEditWarning = false } = {}) {
+    const group = groupForStore(store);
+    if (!group) throw new Error("Unsupported field record type.");
+    if (!items.length) return { ok: true, submitted: 0, queued: 0 };
+    const mode = await DCLM_DB.getSubmissionMode();
+    if (mode === "queue_first" || !navigator.onLine) {
+      for (const item of items) await DCLM_DB.addToQueue(store, { ...item, last_error: null });
+      await DCLM_APP.refreshHomeQueueSummary();
+      await DCLM_APP.renderQueuesView();
+      DCLM_APP.showToast(navigator.onLine
+        ? "Saved on this device. Submit it when you are ready from Sync Queues."
+        : "No connection. Saved on this device and ready to submit when you are online.", "success");
+      return { ok: true, submitted: 0, queued: items.length };
+    }
+    if (!skipEditWarning && ["offerings_queue", "attendance_queue", "fellowship_attendance_queue", "fellowship_offerings_queue"].includes(store)
+      && !window.confirm("Editing this record after submission requires elevated approval. Submit this record now?")) {
+      return { ok: false, cancelled: true, submitted: 0, queued: 0 };
+    }
+    try {
+      const details = await postMany(group, items);
+      const resultById = new Map(details.map((detail) => [String(detail.client_id), detail]));
+      let submitted = 0;
+      let queued = 0;
+      for (const item of items) {
+        const detail = resultById.get(String(item.client_id));
+        if (detail && ["synced", "duplicate"].includes(detail.status)) {
+          await rememberConfirmed(group, item, detail.status);
+          submitted += 1;
+        } else {
+          const error = detail?.error || "The records service did not confirm this submission.";
+          await DCLM_DB.addToQueue(store, { ...item, last_error: error });
+          queued += 1;
+        }
+      }
+      await DCLM_APP.refreshHomeQueueSummary();
+      await DCLM_APP.renderQueuesView();
+      if (queued) DCLM_APP.showToast(`${submitted} submitted; ${queued} remain saved on this device for retry or correction.`, "warning");
+      else DCLM_APP.showToast(`${submitted} ${group.label.toLowerCase()} record(s) submitted successfully.`, "success");
+      return { ok: queued === 0, submitted, queued };
+    } catch (error) {
+      for (const item of items) await DCLM_DB.addToQueue(store, { ...item, last_error: error.message || "Submission was not confirmed." });
+      await DCLM_APP.refreshHomeQueueSummary();
+      await DCLM_APP.renderQueuesView();
+      DCLM_APP.showToast(`Submission was not confirmed. ${items.length} record(s) were saved on this device: ${error.message}`, "warning");
+      return { ok: false, submitted: 0, queued: items.length, error };
+    }
+  }
+
   function payloadFor(group, item) {
     if (group.field === "fellowship_members") return {
       client_id: item.client_id, fellowship_id: item.fellowship_id,
       name: item.name, phone: item.phone || null, address: item.address || null,
-      fellowship_group: item.fellowship_group, role: "member",
+      role: "member",
     };
     if (group.field === "fellowship_attendance") return {
       client_id: item.client_id, fellowship_id: item.fellowship_id,
@@ -72,6 +155,10 @@ const DCLM_SYNC = (function () {
     if (!entries.length) {
       DCLM_APP.showToast("No pending records to sync.", "info");
       return { ok: true, synced: 0 };
+    }
+    const needsEditNotice = entries.some(({ group }) => ["offerings", "worker_attendance", "fellowship_attendance", "fellowship_offerings"].includes(group.field));
+    if (needsEditNotice && !window.confirm("Some offering and attendance records are included. Editing them after submission requires elevated approval. Continue with submission?")) {
+      return { ok: false, cancelled: true };
     }
 
     const eligible = [];
@@ -174,5 +261,5 @@ const DCLM_SYNC = (function () {
     return { ok: failed === 0, synced, failed };
   }
 
-  return { syncAllQueues };
+  return { syncAllQueues, submitOrQueue, submitManyOrQueue };
 })();

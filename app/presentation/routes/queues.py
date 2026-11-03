@@ -2,8 +2,10 @@
 from __future__ import annotations
 
 from typing import Any
-from fasthtml.common import Button, Div, H3, I, P, Small, Span
-from faststrap import Card, Col, Fx, Row
+from fasthtml.common import Button, Div, H3, I, Input, Label, P, Small, Span
+from faststrap import Card, Col, Fx, Modal, Row
+
+from ...core.constants import COUNT_CATEGORIES
 
 from ..components.shell import app_shell
 
@@ -72,6 +74,29 @@ def setup_queue_routes(app: Any) -> None:
             )
         )
 
+        count_edit_rows = [
+            Div(
+                Label(category["label"], for_=f"queued_edit_{category['key']}", cls="form-label small fw-semibold"),
+                Input(id=f"queued_edit_{category['key']}", type="number", min="0", step="1", inputmode="numeric",
+                      cls="form-control", required=True),
+                cls="mb-2",
+            )
+            for category in COUNT_CATEGORIES
+        ]
+        edit_count_modal = Modal(
+            Div(
+                *count_edit_rows,
+                Div(
+                    Button("Cancel", type="button", data_bs_dismiss="modal", cls="btn btn-outline-secondary rounded-pill px-4"),
+                    Button("Save changes", type="button", id="btn-save-queued-count", cls="btn btn-primary rounded-pill px-4 fw-semibold"),
+                    cls="d-flex justify-content-end gap-2 pt-3 border-top mt-3",
+                ),
+                id="queued-count-edit-form",
+            ),
+            modal_id="queuedCountEditModal",
+            title="Edit pending population count",
+        )
+
         return app_shell(
             active_screen="queues",
             page_title="Sync Queues",
@@ -80,5 +105,6 @@ def setup_queue_routes(app: Any) -> None:
                 sync_banner,
                 pending_section,
                 recent_section,
+                edit_count_modal,
             ),
         )

@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from typing import Any
-from fasthtml.common import A, Button, Div, H3, I, P, Small, Span
+from fasthtml.common import A, Button, Div, H3, I, Label, Option, P, Select, Small, Span
 from faststrap import Card, Col, Fx, Row
 
 from ..components.shell import app_shell
@@ -30,6 +30,14 @@ def setup_settings_routes(app: Any) -> None:
             Div(
                 H3("Offline data & sync", cls="h6 fw-bold text-dark mb-2"),
                 P("Pending records are stored on this device until the connection is available.", cls="text-muted small mb-3"),
+                Label("Record submission", for_="submission-mode", cls="form-label small fw-semibold"),
+                Select(
+                    Option("Submit as soon as I save", value="instant"),
+                    Option("Queue first; submit when I choose Sync", value="queue_first"),
+                    id="submission-mode", cls="form-select mb-2",
+                ),
+                Small("Instant mode sends records directly while online and saves them on this device if submission fails. Queue-first mode keeps them here until you submit from Sync Queues.",
+                      id="submission-mode-help", cls="text-muted d-block mb-3"),
                 Div(
                     Span("Last successful sync", cls="text-muted small"),
                     Span("Not yet synced", id="settings-last-sync", cls="small fw-semibold text-dark d-block"),

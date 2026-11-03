@@ -5,7 +5,7 @@
 
 const DCLM_DB = (function () {
   const DB_NAME = "dclm_field_utility_db";
-  const DB_VERSION = 6;
+  const DB_VERSION = 7;
 
   const STORES = {
     active_setup: "key",             // Active Ecclesiastical Identity
@@ -21,6 +21,7 @@ const DCLM_DB = (function () {
     auth_state: "key",                 // Last authorized profile only; never tokens
     count_draft: "key",                // In-progress demographic count per account
     attendance_confirmed: "cache_key", // Minimal event/worker duplicate guard
+    app_settings: "key",               // Account-scoped field capture preferences
   };
 
   let dbInstance = null;
@@ -93,6 +94,22 @@ const DCLM_DB = (function () {
       return performTx("active_setup", "readonly", (store) => {
         return reqToPromise(store.get(`active_identity:${ownerId}`));
       });
+    },
+
+    async getSubmissionMode() {
+      const ownerId = currentOwnerId();
+      if (!ownerId) return "instant";
+      const setting = await performTx("app_settings", "readonly", (store) => reqToPromise(store.get(`submission_mode:${ownerId}`)));
+      return setting?.value === "queue_first" ? "queue_first" : "instant";
+    },
+
+    async saveSubmissionMode(value) {
+      const ownerId = currentOwnerId();
+      if (!ownerId) throw new Error("Sign in before changing submission preferences.");
+      const mode = value === "queue_first" ? "queue_first" : "instant";
+      return performTx("app_settings", "readwrite", (store) => reqToPromise(store.put({
+        key: `submission_mode:${ownerId}`, owner_id: ownerId, value: mode, updated_at: new Date().toISOString(),
+      })));
     },
 
     async saveActiveSetup(identity) {

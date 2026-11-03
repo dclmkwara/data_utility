@@ -86,9 +86,9 @@ def setup_registration_routes(app: Any) -> None:
                 ),
 
                 Details(
-                    Summary("Optional follow-up details", cls="fw-semibold text-primary py-2"),
+                    Summary("Other details", cls="fw-semibold text-primary py-2"),
                     Div(
-                P("Only record extra personal details that are needed for follow-up. You can leave these fields blank.",
+                P("Capture the details the church needs for follow-up.",
                   cls="text-muted small"),
                 # Address
                 Div(
@@ -170,6 +170,7 @@ def setup_registration_routes(app: Any) -> None:
                 ),
                     ),
                     cls="mb-3",
+                    open=True,
                 ),
 
                 # Actions
@@ -180,12 +181,12 @@ def setup_registration_routes(app: Any) -> None:
                     ),
                     Col(
                         Button(
-                            I(cls="bi bi-person-check-fill me-1"), "Register & Save Offline",
+                            "Save",
                             type="button",
                             id="btn-submit-registration",
-                            cls=f"btn btn-primary w-100 rounded-pill py-2 fw-semibold {Fx.base} {Fx.hover_lift}"
+                            cls=f"btn btn-primary rounded-pill px-4 py-2 fw-semibold {Fx.base} {Fx.hover_lift}"
                         ),
-                        cols=8
+                        cols=8, cls="d-flex justify-content-end"
                     ),
                     cls="g-2 pt-2 border-top"
                 ),

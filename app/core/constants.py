@@ -25,6 +25,8 @@ PROGRAM_TYPES_BY_DOMAIN: dict[str, list[str]] = {
         "Sunday Worship Service",
         "Monday Bible Study",
         "Thursday Revival & Training",
+        "Workers Meeting",
+        "Leaders Meeting",
         "Home Caring Fellowship",
         "Personal Evangelism",
     ],
@@ -86,11 +88,9 @@ COUNT_CATEGORIES: list[dict[str, str]] = [
 
 # 6. Finance / Offering Fund Types & Payment Methods
 FUND_TYPES: list[tuple[str, str]] = [
-    ("offering", "Regular Offering"),
     ("tithe", "Tithe"),
-    ("thanksgiving", "Thanksgiving Offering"),
-    ("building_project", "Building / Church Project"),
-    ("evangelism_support", "Evangelism & Missions"),
+    ("offering", "Offering"),
+    ("tithe_offering", "Tithe & Offering"),
 ]
 
 PAYMENT_METHODS: list[tuple[str, str]] = [
@@ -101,12 +101,8 @@ PAYMENT_METHODS: list[tuple[str, str]] = [
 
 # 7. Convert / Newcomer Options
 SALVATION_TYPES: list[tuple[str, str]] = [
-    ("Fresh Convert", "Fresh Convert (Salvation)"),
-    ("Restoration", "Restoration / Backslider Return"),
-    ("Sanctification", "Seeking Holiness / Sanctification"),
-    ("Holy Ghost", "Holy Ghost Baptism"),
-    ("Healing", "Divine Healing & Miracles"),
-    ("Inquirer", "Inquirer / Guest"),
+    ("New Convert", "New Convert"),
+    ("Restoration", "Restoration"),
 ]
 
 MARITAL_STATUSES: list[tuple[str, str]] = [

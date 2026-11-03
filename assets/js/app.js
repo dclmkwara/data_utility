@@ -1,5 +1,5 @@
 /**
- * DCLM Field Utility â€” Master Application Orchestrator
+ * DCLM Field Utility — Master Application Orchestrator
  * High-performance, offline-capable mobile workflows
  */
 
@@ -46,6 +46,13 @@ const DCLM_APP = (function () {
     return String(setup?.program_domain || "").toLowerCase() === "crusade";
   }
 
+  function isWorkerAttendanceProgram(setup = activeSetup) {
+    const domain = String(setup?.program_domain || "").toLowerCase();
+    const type = String(setup?.program_type || "").toLowerCase();
+    return ["weekly", "retreat", "conference"].includes(domain)
+      && /worker|leader|leadership|overseer/.test(type);
+  }
+
   async function persistCountDraft() {
     if (!activeSetup?.location_id) return;
     await DCLM_DB.saveCountDraft({
@@ -72,7 +79,7 @@ const DCLM_APP = (function () {
   }
 
   function escapeHTML(value) {
-    return String(value ?? "").replace(/Church_server/gi, "church records service").replace(/[&<>"']/g, (char) => ({
+    return String(value || "").replace(/Church_server/gi, "church records service").replace(/[&<>"']/g, (char) => ({
       "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
     })[char]);
   }
@@ -146,10 +153,10 @@ const DCLM_APP = (function () {
         iconEl.className = "bi bi-shield-check fs-5 me-2 text-primary";
       }
       if (titleEl) {
-        titleEl.textContent = `${activeSetup.church_type} â€¢ ${activeSetup.program_type} â€¢ ${activeSetup.location_id}`;
+        titleEl.textContent = `${activeSetup.church_type} • ${activeSetup.program_type} • ${activeSetup.location_id}`;
       }
       if (subEl) {
-        subEl.textContent = `Scope: ${activeSetup.program_level} Level â€¢ Date: ${activeSetup.service_date}`;
+        subEl.textContent = `Scope: ${activeSetup.program_level} Level • Date: ${activeSetup.service_date}`;
       }
       if (btnEl) btnEl.textContent = "Change";
       if (shieldEl) shieldEl.classList.add("d-none");
@@ -201,7 +208,7 @@ const DCLM_APP = (function () {
         const label = qs(`#${prefix}_location_label`);
         const level = qs(`#${prefix}_program_level`);
         if (id) id.value = location?.location_id || "";
-        if (label) label.value = location ? `${location.location_name} Â· ${location.formatted_id}` : "Location unavailable";
+        if (label) label.value = location ? `${location.location_name} · ${location.formatted_id}` : "Location unavailable";
         if (level) level.value = "Local";
         const church = qs(`#${prefix}_church_type`);
         if (church && location?.church_type && Array.from(church.options).some((option) => option.value === location.church_type)) {
@@ -246,13 +253,13 @@ const DCLM_APP = (function () {
         && activeSetup?.program_type === programType
         && activeSetup?.event_id;
       const label = sameVerifiedContext
-        ? `${activeSetup.program_type} Â· ${activeSetup.service_date} Â· Previously verified (offline)`
+        ? `${activeSetup.program_type} · ${activeSetup.service_date} · Previously verified (offline)`
         : "Connect to load available scheduled events";
       select.replaceChildren(new Option(label, sameVerifiedContext ? activeSetup.event_id : ""));
       select.disabled = true;
       return;
     }
-    select.replaceChildren(new Option("Loading matching eventsâ€¦", ""));
+    select.replaceChildren(new Option("Loading matching events…", ""));
     select.disabled = true;
     try {
       const query = new URLSearchParams({ location_id: locationId, date: serviceDate, program_type: programType });
@@ -520,6 +527,9 @@ const DCLM_APP = (function () {
         if (category && counterState[category] !== undefined) {
           counterState[category] += 1;
           updateCounterDisplays();
+          const grandTotal = Object.values(counterState).reduce((a, b) => a + b, 0);
+          if (grandTotal > 0 && grandTotal % 50 === 0) haptic("milestone");
+          else haptic("tick");
           await persistCountDraft();
 
           // Brief visual pulse on the tile number
@@ -529,12 +539,6 @@ const DCLM_APP = (function () {
             setTimeout(() => numEl.classList.remove("dclm-count-pulse"), 120);
           }
 
-          const grandTotal = Object.values(counterState).reduce((a, b) => a + b, 0);
-          if (grandTotal > 0 && grandTotal % 50 === 0) {
-            haptic("milestone");
-          } else {
-            haptic("tick");
-          }
         }
       });
     });
@@ -599,8 +603,12 @@ const DCLM_APP = (function () {
           return;
         }
 
-        const fundType = qs("#offering-fund-type")?.value || "offering";
+        const fundType = qs("#offering-fund-type")?.value || "";
         const paymentMethod = qs("#offering-payment-method")?.value || "cash";
+        if (!["tithe", "offering", "tithe_offering"].includes(fundType)) {
+          showToast("Choose Tithe, Offering, or Tithe & Offering.", "warning");
+          return;
+        }
 
         const item = {
           client_id: generateUUID(),
@@ -616,9 +624,8 @@ const DCLM_APP = (function () {
           service_date: activeSetup.service_date,
         };
 
-        await DCLM_DB.addToQueue("offerings_queue", item);
-        await refreshHomeQueueSummary();
-        showToast(`Entry of â‚¦${amountValue.toLocaleString()} queued offline.`, "success");
+        const result = await DCLM_SYNC.submitOrQueue("offerings_queue", item);
+        if (result.cancelled) return;
         haptic("success");
         if (amountInput) amountInput.value = "";
       });
@@ -670,10 +677,9 @@ const DCLM_APP = (function () {
           service_date: activeSetup.service_date,
         };
 
-        await DCLM_DB.addToQueue("counts_queue", batch);
-        await refreshHomeQueueSummary();
+        const result = await DCLM_SYNC.submitOrQueue("counts_queue", batch);
+        if (result.cancelled) return;
         await DCLM_DB.clearCountDraft();
-        showToast(`Batch of ${total.toLocaleString()} souls queued for sync!`, "success");
         haptic("success");
 
         // Optional: clear active tallies after successful queue
@@ -762,7 +768,7 @@ const DCLM_APP = (function () {
         emptyEl.textContent = query
           ? "No workers match this search."
           : rosterState === "loading"
-            ? "Loading the approved worker rosterâ€¦"
+            ? "Loading the approved worker roster…"
             : rosterState === "error"
               ? "Roster unavailable. Check your connection and access, then refresh."
               : rosterState === "empty"
@@ -784,7 +790,7 @@ const DCLM_APP = (function () {
           </div>
           <div>
             <div class="fw-bold text-dark mb-0">${escapeHTML(worker.name)}</div>
-            <div class="small text-muted">${escapeHTML(worker.phone)} â€¢ ${escapeHTML(worker.unit || "General Worker")}</div>
+            <div class="small text-muted">${escapeHTML(worker.phone)} • ${escapeHTML(worker.unit || "General Worker")}</div>
           </div>
         </div>
         <button type="button" class="dclm-check-btn ${worker.marked_present || worker.attendance_submitted ? "is-checked" : ""}" ${worker.attendance_submitted ? "disabled" : ""} aria-label="${worker.attendance_submitted ? "Attendance submitted" : "Toggle attendance"}">
@@ -810,17 +816,22 @@ const DCLM_APP = (function () {
     const presentListEl = qs("#review-marked-list");
     const presentCountEl = qs("#review-present-count");
     const rosterCountEl = qs("#review-roster-count");
-    const scopeEl = qs("#review-setup-scope");
-
     if (!presentListEl) return;
+    if (!isWorkerAttendanceProgram()) {
+      const submitButton = qs("#btn-approve-attendance-batch");
+      if (submitButton) submitButton.disabled = true;
+      presentListEl.innerHTML = '<div class="text-warning text-center py-4 small">Select a Workers Meeting, Leaders Meeting, or a worker/leader conference or retreat to review attendance.</div>';
+      return;
+    }
 
-    DCLM_DB.getWorkerRoster(activeSetup?.location_id || "", eventContextKey()).then((roster) => {
+    DCLM_DB.getWorkerRoster(activeSetup.location_id, eventContextKey()).then((roster) => {
       const marked = roster.filter((w) => w.marked_present);
-      if (presentCountEl) presentCountEl.textContent = `${marked.length} Workers`;
-      if (rosterCountEl) rosterCountEl.textContent = `${roster.length} Total Registered`;
-      if (scopeEl && activeSetup) {
-        scopeEl.textContent = `${activeSetup.location_id} (${activeSetup.program_type})`;
-      }
+      if (presentCountEl) presentCountEl.textContent = marked.length.toLocaleString();
+      if (rosterCountEl) rosterCountEl.textContent = roster.length.toLocaleString();
+      const scopeEl = qs("#review-setup-scope");
+      const contextEl = qs("#review-setup-context");
+      if (scopeEl) scopeEl.textContent = activeSetup.program_type;
+      if (contextEl) contextEl.textContent = `${assignedLocation?.location_name || "Assigned location"} · ${activeSetup.service_date}`;
 
       if (marked.length === 0) {
         presentListEl.innerHTML = '<div class="text-muted text-center py-4 small">No workers marked present yet.</div>';
@@ -838,7 +849,7 @@ const DCLM_APP = (function () {
         const details = document.createElement("div");
         details.className = "text-muted";
         details.style.fontSize = "0.75rem";
-        details.textContent = `${worker.phone || ""} ? ${worker.unit || "Worker"}`;
+        details.textContent = `${worker.phone || ""} · ${worker.unit || "Worker"}`;
         info.append(name, details);
         const badge = document.createElement("span");
         badge.className = "badge bg-success-subtle text-success rounded-pill px-3 py-1 small";
@@ -851,6 +862,10 @@ const DCLM_APP = (function () {
     const approveBtn = qs("#btn-approve-attendance-batch");
     if (approveBtn) {
       approveBtn.addEventListener("click", async () => {
+        if (!isWorkerAttendanceProgram()) {
+          showToast("Attendance can only be submitted for worker or leader meetings, conferences, and retreats.", "warning");
+          return;
+        }
         if (!activeSetup?.location_id || !activeSetup?.service_date || !activeSetup?.program_type
             || (requiresScheduledEvent() && !activeSetup.event_id)) {
           showToast(requiresScheduledEvent()
@@ -869,7 +884,7 @@ const DCLM_APP = (function () {
         }
 
         const submittedWorkers = await DCLM_DB.getAttendanceSubmittedWorkerIds(contextKey);
-        let queuedCount = 0;
+        const attendanceItems = [];
         for (const worker of marked) {
           if (submittedWorkers.has(String(worker.worker_id))) continue;
           const item = {
@@ -885,24 +900,36 @@ const DCLM_APP = (function () {
             status: "present",
             recorded_at: new Date().toISOString(),
           };
-          await DCLM_DB.addToQueue("attendance_queue", item);
-          queuedCount += 1;
+          attendanceItems.push(item);
         }
 
-        if (!queuedCount) {
+        if (!attendanceItems.length) {
           showToast("These workers already have attendance records queued or confirmed for this event.", "info");
           return;
         }
-        await refreshHomeQueueSummary();
-        showToast(`Attendance for ${queuedCount} worker(s) queued for this event.`, "success");
+        if (navigator.onLine && !window.confirm("Editing attendance after submission requires elevated approval. Submit the marked attendance now?")) return;
+        const submission = await DCLM_SYNC.submitManyOrQueue("attendance_queue", attendanceItems, { skipEditWarning: true });
         haptic("success");
-
-        setTimeout(() => { window.location.href = "/queues"; }, 500);
+        if (submission.queued) setTimeout(() => { window.location.href = "/queues"; }, 500);
       });
     }
   }
 
   function initAttendanceBindings() {
+    const allowed = isWorkerAttendanceProgram();
+    const warning = qs("#attendance-setup-warning");
+    if (warning) warning.classList.toggle("d-none", allowed);
+    if (!allowed) {
+      const input = qs("#worker-search-input");
+      const refresh = qs("#btn-refresh-worker-roster");
+      if (input) input.disabled = true;
+      if (refresh) refresh.disabled = true;
+      const approve = qs("#btn-approve-attendance-batch");
+      if (approve) approve.disabled = true;
+      const list = qs("#worker-roster-list");
+      if (list) list.innerHTML = '<div class="text-warning text-center py-4 small">Choose a Workers Meeting, Leaders Meeting, or a worker/leader conference or retreat in Program Setup.</div>';
+      return;
+    }
     const searchInput = qs("#worker-search-input");
     if (searchInput) {
       searchInput.addEventListener("input", renderWorkerRoster);
@@ -917,7 +944,7 @@ const DCLM_APP = (function () {
 
     if (activeScreen === "fellowship") {
       // Fellowship reports use their own authorized fellowship ID and date.
-    } else if (activeSetup && activeSetup.location_id) {
+    } else if (activeSetup && activeSetup.location_id && !window.location.pathname.endsWith("/review")) {
       fetchLocationRoster(activeSetup.location_id);
     }
   }
@@ -973,7 +1000,7 @@ const DCLM_APP = (function () {
           return;
         }
         if (name.length > 120 || !/^\+?\d{7,15}$/.test(phone)) {
-          showToast("Use a name up to 120 characters and a phone number with 7â€“15 digits.", "warning");
+          showToast("Use a name up to 120 characters and a phone number with 7–15 digits.", "warning");
           haptic("warning");
           return;
         }
@@ -1018,9 +1045,8 @@ const DCLM_APP = (function () {
 
         regSubmitBtn.disabled = true;
         try {
-          await DCLM_DB.addToQueue("registration_queue", record);
-          showToast(`Saved ${name} on this device. It is waiting to sync.`, "success");
-          await refreshHomeQueueSummary();
+          const result = await DCLM_SYNC.submitOrQueue("registration_queue", record);
+          if (result.cancelled) return;
           haptic("success");
           qs("#registration-entry-form")?.reset();
           if (recordTypeInput) recordTypeInput.value = "convert";
@@ -1039,7 +1065,6 @@ const DCLM_APP = (function () {
 
   function initFellowshipBindings() {
     const select = qs("#fellowship_id");
-    const groupSelect = qs("#fellowship_group");
     const today = todayISO();
     for (const id of ["fellowship_attendance_date", "fellowship_offering_date"]) {
       const input = qs(`#${id}`);
@@ -1050,7 +1075,8 @@ const DCLM_APP = (function () {
       if (select) {
         select.replaceChildren(new Option(items.length ? "Choose your house fellowship" : "No fellowship is assigned to this location", ""));
         for (const fellowship of items) {
-          select.add(new Option(`${fellowship.name}${fellowship.code ? ` Â· ${fellowship.code}` : ""}`, fellowship.fellowship_id));
+          const category = fellowship.fellowship_group_label || "Category not configured";
+          select.add(new Option(`${fellowship.name} · ${category}${fellowship.code ? ` · ${fellowship.code}` : ""}`, fellowship.fellowship_id));
         }
       }
       const wrap = qs("#fellowship-content-wrap");
@@ -1085,14 +1111,17 @@ const DCLM_APP = (function () {
     const save = async (store, extra) => {
       const fellowship = selected();
       if (!fellowship) { showToast("Choose an assigned house fellowship first.", "warning"); return; }
-      await DCLM_DB.addToQueue(store, {
+      const group = store === "fellowship_members_queue" ? fellowship.fellowship_group : undefined;
+      if (store === "fellowship_members_queue" && !group) {
+        showToast("This fellowship has no category yet. Ask the administrator to assign its category before adding members.", "warning");
+        return false;
+      }
+      return DCLM_SYNC.submitOrQueue(store, {
         client_id: generateUUID(), fellowship_id: fellowship.fellowship_id, fellowship_name: fellowship.name,
+        fellowship_group: group,
         location_id: assignedLocation?.location_id || window.DCLM_CURRENT_USER?.location_id || "",
         ...extra,
       });
-      showToast("Saved on this device. It is waiting to sync.", "success");
-      await refreshHomeQueueSummary();
-      renderQueuesView();
     };
 
     qs("#btn-save-fellowship-attendance")?.addEventListener("click", async () => {
@@ -1114,12 +1143,12 @@ const DCLM_APP = (function () {
       const name = qs("#fellowship_member_name")?.value.trim() || "";
       const phone = qs("#fellowship_member_phone")?.value.trim() || "";
       const address = qs("#fellowship_member_address")?.value.trim() || "";
-      const fellowshipGroup = groupSelect?.value || "";
-      if (!name || name.length > 120 || phone.length > 30 || !address || address.length > 300 || !fellowshipGroup) {
-        showToast("Enter the member name, fellowship group, home address (up to 300 characters), and phone up to 30 characters.", "warning");
+      if (!name || name.length > 120 || phone.length > 30 || !address || address.length > 300) {
+        showToast("Enter the member name and home address (up to 300 characters); phone must be 30 characters or fewer.", "warning");
         return;
       }
-      await save("fellowship_members_queue", { name, phone: phone || null, address, fellowship_group: fellowshipGroup });
+      const result = await save("fellowship_members_queue", { name, phone: phone || null, address });
+      if (result === false) return;
       qs("#fellowship_member_name").value = "";
       qs("#fellowship_member_phone").value = "";
       qs("#fellowship_member_address").value = "";
@@ -1166,10 +1195,13 @@ const DCLM_APP = (function () {
           <div class="dclm-queue-item type-count">
             <div>
               <div class="fw-bold text-dark small"><i class="bi bi-people-fill text-primary me-1"></i> Population Count (${Number(item.total || 0).toLocaleString()} Souls)</div>
-              <div class="small text-muted">${escapeHTML(item.location_id)} â€¢ ${escapeHTML(item.service_date)}</div>
+              <div class="small text-muted">${escapeHTML(item.program_type || "Church service")} ? ${escapeHTML(item.service_date)}</div>
               ${item.last_error ? `<div class="small text-danger mt-1">Sync issue: ${escapeHTML(item.last_error)}</div>` : ""}
             </div>
-          <button class="btn btn-sm btn-outline-danger rounded-pill px-3" data-discard-store="counts_queue" data-discard-id="${escapeHTML(item.client_id)}">Discard</button>
+            <div class="d-flex gap-2">
+              <button class="btn btn-sm btn-outline-primary rounded-pill px-3" data-edit-count-id="${escapeHTML(item.client_id)}">Edit</button>
+              <button class="btn btn-sm btn-outline-danger rounded-pill px-3" data-discard-store="counts_queue" data-discard-id="${escapeHTML(item.client_id)}">Discard</button>
+            </div>
           </div>
         `;
       });
@@ -1178,7 +1210,7 @@ const DCLM_APP = (function () {
         html += `
           <div class="dclm-queue-item type-offering">
             <div>
-              <div class="fw-bold text-dark small"><i class="bi bi-wallet2 text-success me-1"></i> Offering / Tithe (â‚¦${Number(item.amount).toLocaleString()})</div>
+              <div class="fw-bold text-dark small"><i class="bi bi-wallet2 text-success me-1"></i> Offering / Tithe (₦${Number(item.amount).toLocaleString()})</div>
               <div class="small text-muted">${escapeHTML(item.fund_type)} via ${escapeHTML(item.payment_method)}</div>
               ${item.last_error ? `<div class="small text-danger mt-1">Sync issue: ${escapeHTML(item.last_error)}</div>` : ""}
             </div>
@@ -1205,7 +1237,7 @@ const DCLM_APP = (function () {
           <div class="dclm-queue-item type-register">
             <div>
               <div class="fw-bold text-dark small"><i class="bi bi-person-plus-fill text-warning me-1"></i> ${item.record_type === "convert" ? "Convert" : "Guest"}: ${escapeHTML(item.name)}</div>
-              <div class="small text-muted">${escapeHTML(item.phone)} â€¢ ${escapeHTML(item.details?.salvation_type || "Follow-up")}</div>
+              <div class="small text-muted">${escapeHTML(item.phone)} • ${escapeHTML(item.details?.salvation_type || "Follow-up")}</div>
               ${item.last_error ? `<div class="small text-danger mt-1">Sync issue: ${escapeHTML(item.last_error)}</div>` : ""}
             </div>
             <button class="btn btn-sm btn-outline-danger rounded-pill px-3" data-discard-store="registration_queue" data-discard-id="${escapeHTML(item.client_id)}">Discard</button>
@@ -1221,9 +1253,9 @@ const DCLM_APP = (function () {
       for (const [items, label, store] of fellowshipQueues) {
         items.forEach((item) => {
           const detail = store === "fellowship_attendance_queue"
-            ? `${Number(item.men) + Number(item.women) + Number(item.youths) + Number(item.children)} people Â· ${item.date}`
-            : store === "fellowship_offerings_queue" ? `â‚¦${Number(item.amount).toLocaleString()} Â· ${item.date}` : escapeHTML(item.name);
-          html += `<div class="dclm-queue-item type-attendance"><div><div class="fw-bold text-dark small"><i class="bi bi-house-heart text-primary me-1"></i>${label}</div><div class="small text-muted">${escapeHTML(item.fellowship_name || "House Fellowship")} Â· ${detail}</div>${item.last_error ? `<div class="small text-danger mt-1">Sync issue: ${escapeHTML(item.last_error)}</div>` : ""}</div><button class="btn btn-sm btn-outline-danger rounded-pill px-3" data-discard-store="${store}" data-discard-id="${escapeHTML(item.client_id)}">Discard</button></div>`;
+            ? `${Number(item.men) + Number(item.women) + Number(item.youths) + Number(item.children)} people · ${item.date}`
+            : store === "fellowship_offerings_queue" ? `₦${Number(item.amount).toLocaleString()} · ${item.date}` : escapeHTML(item.name);
+          html += `<div class="dclm-queue-item type-attendance"><div><div class="fw-bold text-dark small"><i class="bi bi-house-heart text-primary me-1"></i>${label}</div><div class="small text-muted">${escapeHTML(item.fellowship_name || "House Fellowship")} · ${detail}</div>${item.last_error ? `<div class="small text-danger mt-1">Sync issue: ${escapeHTML(item.last_error)}</div>` : ""}</div><button class="btn btn-sm btn-outline-danger rounded-pill px-3" data-discard-store="${store}" data-discard-id="${escapeHTML(item.client_id)}">Discard</button></div>`;
         });
       }
 
@@ -1244,7 +1276,7 @@ const DCLM_APP = (function () {
           <div class="d-flex justify-content-between align-items-center p-2 mb-2 bg-white rounded-3 border">
             <div>
               <div class="fw-bold text-dark small">${escapeHTML(r.type || "Batch Record")}</div>
-              <div class="text-muted" style="font-size: 0.75rem;">${new Date(r.synced_at).toLocaleTimeString()} â€¢ ${r.location_id || "Church"}</div>
+              <div class="text-muted" style="font-size: 0.75rem;">${new Date(r.synced_at).toLocaleTimeString()} • ${r.location_id || "Church"}</div>
             </div>
             <span class="badge bg-success text-white rounded-pill px-2 py-1 small">Synced</span>
           </div>
@@ -1255,13 +1287,50 @@ const DCLM_APP = (function () {
 
   function initQueuesBindings() {
     const listEl = qs("#pending-queue-list");
+    let editingCount = null;
     listEl?.addEventListener("click", (event) => {
+      const editCount = event.target.closest("[data-edit-count-id]");
+      if (editCount) {
+        DCLM_DB.getAllFromQueue("counts_queue").then((items) => {
+          editingCount = items.find((item) => String(item.client_id) === String(editCount.dataset.editCountId));
+          if (!editingCount) return;
+          ["adult_male", "adult_female", "youth_male", "youth_female", "boys", "girls"].forEach((key) => {
+            const input = qs(`#queued_edit_${key}`);
+            if (input) input.value = Number(editingCount[key] || 0);
+          });
+          if (typeof bootstrap !== "undefined") bootstrap.Modal.getOrCreateInstance(qs("#queuedCountEditModal")).show();
+        });
+        return;
+      }
       const discard = event.target.closest("[data-discard-store]");
       if (discard) {
         window.DCLM_APP.discardQueueItem(discard.dataset.discardStore, discard.dataset.discardId);
       } else if (event.target.closest("[data-discard-attendance]")) {
         window.DCLM_APP.discardAllAttendance();
       }
+    });
+
+    qs("#btn-save-queued-count")?.addEventListener("click", async () => {
+      if (!editingCount) return;
+      const keys = ["adult_male", "adult_female", "youth_male", "youth_female", "boys", "girls"];
+      const values = Object.fromEntries(keys.map((key) => [key, Number(qs(`#queued_edit_${key}`)?.value || 0)]));
+      if (Object.values(values).some((value) => !Number.isInteger(value) || value < 0 || value > 999999)) {
+        showToast("Use whole number counts from 0 to 999999 in each category.", "warning");
+        return;
+      }
+      const total = Object.values(values).reduce((sum, value) => sum + value, 0);
+      if (total <= 0) {
+        showToast("A population count must contain at least one person.", "warning");
+        return;
+      }
+      await DCLM_DB.updateQueueItems("counts_queue", [{
+        ...editingCount, ...values, total, status: "pending", last_error: null, updated_at: new Date().toISOString(),
+      }]);
+      editingCount = null;
+      if (typeof bootstrap !== "undefined") bootstrap.Modal.getInstance(qs("#queuedCountEditModal"))?.hide();
+      showToast("Pending population count updated.", "success");
+      await renderQueuesView();
+      await refreshHomeQueueSummary();
     });
 
     const syncAllBtn = qs("#btn-sync-all-queues");
@@ -1296,6 +1365,16 @@ const DCLM_APP = (function () {
     if (userRole) userRole.textContent = (user.roles || []).join(", ") || "Field user";
     if (userLocation) userLocation.textContent = user.location_id || "Not assigned";
     updateNetworkStatus();
+    const modeSelect = qs("#submission-mode");
+    if (modeSelect) {
+      DCLM_DB.getSubmissionMode().then((mode) => { modeSelect.value = mode; });
+      modeSelect.addEventListener("change", async () => {
+        await DCLM_DB.saveSubmissionMode(modeSelect.value);
+        showToast(modeSelect.value === "instant"
+          ? "Records will submit as soon as you save while online."
+          : "Records will stay queued until you choose Sync.", "success");
+      });
+    }
 
     // Clear worker roster cache
     const clearRosterBtn = qs("#btn-clear-roster-cache");
@@ -1314,7 +1393,7 @@ const DCLM_APP = (function () {
     if (clearAllBtn) {
       clearAllBtn.addEventListener("click", async () => {
         if (confirm("Delete this account's setup, cached roster, recent history, and all pending records from this device? Pending records cannot be recovered after deletion.")) {
-          const stores = ["active_setup", "worker_roster", "counts_queue", "offerings_queue",
+          const stores = ["active_setup", "worker_roster", "app_settings", "counts_queue", "offerings_queue",
                           "attendance_queue", "registration_queue", "fellowship_members_queue", "fellowship_attendance_queue",
                           "fellowship_offerings_queue", "recent_submissions", "count_draft",
                           "attendance_confirmed"];

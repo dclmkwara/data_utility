@@ -1,9 +1,9 @@
 /**
- * DCLM Field Utility â€” Offline Service Worker
+ * DCLM Field Utility — Offline Service Worker
  * Cache-first strategy for app shell and assets
  */
 
-const CACHE_NAME = "dclm-utility-v17";
+const CACHE_NAME = "dclm-utility-v18";
 const ASSETS_TO_CACHE = [
   "/",
   "/login",
@@ -15,7 +15,7 @@ const ASSETS_TO_CACHE = [
   "/queues",
   "/fellowship",
   "/information",
-  "/assets/css/utility.css?v=8",
+  "/assets/css/utility.css?v=9",
   "/static/css/bootstrap.min.css",
   "/static/css/bootstrap-icons.min.css",
   "/static/css/fonts/bootstrap-icons.woff2?dd67030699838ea613ee6dbda90effa6",
@@ -27,11 +27,11 @@ const ASSETS_TO_CACHE = [
   "/static/js/faststrap-htmx.js",
   "/static/js/faststrap-init.js",
   "/static/favicon.svg",
-  "/assets/js/db.js?v=8",
+  "/assets/js/db.js?v=9",
   "/assets/js/auth.js?v=3",
   "/assets/js/haptics.js?v=3",
-  "/assets/js/sync.js?v=8",
-  "/assets/js/app.js?v=11",
+  "/assets/js/sync.js?v=9",
+  "/assets/js/app.js?v=12",
   "/assets/manifest.json",
   "/assets/favicon.png",
   "/assets/icon-192.png",

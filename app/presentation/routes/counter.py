@@ -66,7 +66,7 @@ def setup_counter_routes(app: Any) -> None:
                     ),
                     cls="d-flex justify-content-center"
                 ),
-                cls="dclm-total-display"
+                cls="dclm-total-display dclm-total-display--compact"
             ),
             cls=f"dclm-card dclm-card--navy mb-3 {Fx.base} {Fx.fade_in}"
         )
@@ -75,7 +75,6 @@ def setup_counter_routes(app: Any) -> None:
         counter_tiles = Div(
             *[
                 Button(
-                    I(cls=f"bi bi-{cat['icon']} dclm-tile-icon tone-{cat['tone']}"),
                     Span("0", id=f"count-display-{cat['key']}", cls="dclm-count-num"),
                     Span(cat["label"], cls="dclm-count-label"),
                     type="button",
@@ -93,49 +92,44 @@ def setup_counter_routes(app: Any) -> None:
         offering_card = Card(
             Div(
                 H3("Tithe & Offering Collection", cls="h6 fw-bold text-dark mb-2"),
-                P("Enter each teller's collected amount separately. Tithes and offerings remain distinguishable in reports.",
-                  cls="text-muted small mb-2"),
                 Row(
                     Col(
-                        Div(
-                            Span("NGN", cls="input-group-text bg-light fw-bold text-success border-end-0"),
-                            Input(
-                                id="offering-amount-input",
-                                type="number",
-                                step="0.01",
-                                min="0",
-                                max="9999999999.99",
-                                placeholder="0.00",
-                                cls="form-control form-control-lg border-start-0 font-monospace fw-bold"
-                            ),
-                            cls="input-group"
+                        Select(
+                            Option("Select collection type", value="", selected=True),
+                            *[Option(label, value=key) for key, label in FUND_TYPES],
+                            id="offering-fund-type",
+                            cls="form-select rounded-3",
+                            aria_label="Collection type",
+                            required=True,
                         ),
                         cols=12, cls="mb-2"
                     ),
                     Col(
                         Select(
-                            *[Option(label, value=key) for key, label in FUND_TYPES],
-                            id="offering-fund-type",
-                            cls="form-select rounded-3"
-                        ),
-                        cols=6, cls="mb-2"
-                    ),
-                    Col(
-                        Select(
                             *[Option(label, value=key) for key, label in PAYMENT_METHODS],
                             id="offering-payment-method",
-                            cls="form-select rounded-3"
+                            cls="form-select rounded-3",
+                            aria_label="Payment type",
                         ),
-                        cols=6, cls="mb-2"
+                        cols=12, cls="mb-2"
+                    ),
+                    Col(
+                        Div(
+                            Span("NGN", cls="input-group-text bg-light fw-bold text-success border-end-0"),
+                            Input(id="offering-amount-input", type="number", step="0.01", min="0", max="9999999999.99",
+                                  placeholder="Amount", cls="form-control border-start-0 font-monospace fw-bold"),
+                            cls="input-group"
+                        ),
+                        cols=12, cls="mb-2"
                     ),
                     Col(
                         Button(
-                            I(cls="bi bi-wallet2 me-1"), "Record Offering Entry",
+                            "Save ", I(cls="bi bi-wallet2"),
                             type="button",
                             id="btn-submit-offering",
-                            cls="btn btn-success w-100 rounded-pill py-2 fw-semibold"
+                            cls="btn btn-success rounded-pill px-4 py-2 fw-semibold d-flex align-items-center gap-2 ms-auto"
                         ),
-                        cols=12
+                        cols=12, cls="d-flex justify-content-end"
                     ),
                     cls="g-2"
                 ),
@@ -146,12 +140,12 @@ def setup_counter_routes(app: Any) -> None:
         # Queue Final Batch Submit
         bottom_actions = Div(
             Button(
-                I(cls="bi bi-cloud-check-fill me-2"), "Save & Queue Count Batch",
+                I(cls="bi bi-cloud-check-fill me-2"), "Save Count",
                 type="button",
                 id="btn-finalize-count-batch",
-                cls="btn btn-primary w-100 btn-lg rounded-pill py-3 fw-bold"
+                cls="btn btn-primary rounded-pill px-4 py-2 fw-bold ms-auto d-block"
             ),
-            cls="mb-4"
+            cls="d-flex justify-content-end mb-4"
         )
 
         return app_shell(

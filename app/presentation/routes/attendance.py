@@ -58,9 +58,9 @@ def setup_attendance_routes(app: Any) -> None:
         # Bottom Usher Review Link
         review_gate = Div(
             A(
-                I(cls="bi bi-clipboard-check-fill me-2"), "Review & Approve Attendance",
+                I(cls="bi bi-clipboard-check-fill me-2"), "Review",
                 href="/attendance/review",
-                cls=f"btn btn-primary w-100 btn-lg rounded-pill py-3 fw-bold {Fx.base} {Fx.hover_lift}"
+                cls=f"btn btn-primary rounded-pill px-4 py-2 fw-bold {Fx.base} {Fx.hover_lift}"
             ),
             P(
                 "Workers can mark their attendance above. Final batch submission is reserved for the usher review screen.",
@@ -75,6 +75,8 @@ def setup_attendance_routes(app: Any) -> None:
             subtitle="Search cached workers locally, self-check-in with instant haptics.",
             content=Div(
                 setup_required_shield("Workers Attendance"),
+                Div("Choose a Workers Meeting, Leaders Meeting, or a worker/leader conference or retreat in Program Setup to use attendance.",
+                    id="attendance-setup-warning", role="status", cls="alert alert-warning d-none mb-3"),
                 Div(
                     search_card,
                     worker_list_container,
@@ -89,24 +91,20 @@ def setup_attendance_routes(app: Any) -> None:
         # Review & Approval Screen
         summary_card = Card(
             Div(
-                H3("Attendance Submission Review", cls="h6 fw-bold text-dark mb-3"),
                 Div(
-                    Row(
-                        Col(Span("Ecclesiastical Scope:", cls="text-muted small"), cols=5),
-                        Col(Span("Not Set", id="review-setup-scope", cls="small fw-bold text-dark text-end"), cols=7),
-                        cls="mb-2"
+                    Div(
+                        Div(I(cls="bi bi-people-fill"), Span("Attendance Submission Review", cls="fw-bold"), cls="d-flex align-items-center gap-2"),
+                        Span("WORKERS & LEADERS", cls="badge text-bg-primary-subtle text-primary-emphasis rounded-pill px-3 py-2"),
+                        cls="d-flex justify-content-between align-items-center gap-2 mb-3"
                     ),
-                    Row(
-                        Col(Span("Total Present:", cls="text-muted small"), cols=5),
-                        Col(Span("0 Workers", id="review-present-count", cls="h5 fw-bold text-success text-end mb-0"), cols=7),
-                        cls="mb-2"
+                    Div(
+                        Div(Span("Program", cls="text-muted small d-block"), Span("Not set", id="review-setup-scope", cls="fw-bold text-dark"), cls="attendance-review-program"),
+                        Div(Span("Location & date", cls="text-muted small d-block"), Span("Not set", id="review-setup-context", cls="small fw-semibold text-dark"), cls="attendance-review-context"),
+                        Div(Span("Present", cls="text-muted small d-block"), Span("0", id="review-present-count", cls="h3 fw-bold text-success mb-0"), cls="attendance-review-present"),
+                        Div(Span("Roster", cls="text-muted small d-block"), Span("0", id="review-roster-count", cls="h5 fw-bold text-dark mb-0"), cls="attendance-review-roster"),
+                        id="attendance-review-summary",
+                        cls="mb-3"
                     ),
-                    Row(
-                        Col(Span("Total on Roster:", cls="text-muted small"), cols=5),
-                        Col(Span("0 Workers", id="review-roster-count", cls="small text-muted text-end"), cols=7),
-                        cls="mb-1"
-                    ),
-                    cls="p-2 bg-light rounded-3 mb-3"
                 ),
                 H3("Marked Workers Roster", cls="small fw-bold text-muted text-uppercase tracking-wider mb-2"),
                 Div(id="review-marked-list", cls="d-flex flex-column gap-2 mb-3"),
@@ -126,12 +124,12 @@ def setup_attendance_routes(app: Any) -> None:
                 ),
                 Col(
                     Button(
-                        I(cls="bi bi-check2-circle me-1"), "Approve & Queue Batch",
+                        I(cls="bi bi-check2-circle me-1"), "Submit",
                         type="button",
                         id="btn-approve-attendance-batch",
-                        cls=f"btn btn-success w-100 rounded-pill py-2 fw-bold {Fx.base} {Fx.hover_lift}"
+                        cls=f"btn btn-success rounded-pill px-4 py-2 fw-bold {Fx.base} {Fx.hover_lift}"
                     ),
-                    cols=7
+                    cols=7, cls="d-flex justify-content-end"
                 ),
                 cls="g-2"
             ),
@@ -143,6 +141,8 @@ def setup_attendance_routes(app: Any) -> None:
             page_title="Attendance Review",
             subtitle="Head usher verification and sign-off before cloud synchronization.",
             content=Div(
+                Div("Choose a Workers Meeting, Leaders Meeting, or a worker/leader conference or retreat in Program Setup to use attendance.",
+                    id="attendance-setup-warning", role="status", cls="alert alert-warning d-none mb-3"),
                 summary_card,
                 actions,
             ),

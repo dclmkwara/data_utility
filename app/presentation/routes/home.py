@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from typing import Any
-from fasthtml.common import A, Div, H2, H3, I, P, Small, Span
+from fasthtml.common import A, Div, H2, H3, I, Img, P, Small, Span
 from faststrap import Card, Col, Fx, Row
 
 from ..components.shell import app_shell
@@ -14,12 +14,16 @@ def setup_home_routes(app: Any) -> None:
         # Top Welcome Hero Banner
         hero_card = Card(
             Div(
+                Img(src="/assets/icon-512.png", alt="Deeper Life Bible Church logo", cls="dclm-hero-logo"),
+                Div(
                 Span("Deeper Life Bible Church", cls="dclm-hero-tagline d-block"),
                 H2("Field Utility", cls="dclm-hero-title mb-1"),
                 P("Offline-first headcounts, attendance & field registration.", cls="small mb-0", style="color: rgba(255,255,255,0.65)"),
-                cls="dclm-total-display py-4"
+                cls="dclm-hero-copy"
+                ),
+                cls="dclm-total-display dclm-hero-content py-4"
             ),
-            cls=f"dclm-card dclm-card--navy mb-3 {Fx.base} {Fx.fade_in}"
+            cls=f"dclm-card dclm-card--navy dclm-home-hero mb-3 {Fx.base} {Fx.fade_in}"
         )
 
         queue_card = A(
@@ -28,7 +32,7 @@ def setup_home_routes(app: Any) -> None:
                     I(cls="bi bi-cloud-arrow-up-fill fs-4 text-primary me-3"),
                     Div(
                         H3("Pending uploads", cls="h6 fw-bold text-dark mb-1"),
-                        Small("Your saved records stay on this device until they sync.",
+                        Small("Online records submit as you save; offline records wait here to sync.",
                               id="home-queue-caption", cls="text-muted d-block"),
                     ),
                     cls="d-flex align-items-center min-w-0",

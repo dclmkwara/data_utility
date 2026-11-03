@@ -5,7 +5,6 @@ from typing import Any
 from fasthtml.common import Button, Div, H3, Input, Label, Option, P, Select, Small
 from faststrap import Card, Col, Row
 
-from ...core.constants import FELLOWSHIP_GROUPS
 from ..components.shell import app_shell
 
 
@@ -27,7 +26,7 @@ def setup_fellowship_routes(app: Any) -> None:
             ], cls="g-2"),
             Label("Topic (optional)", for_="fellowship_topic", cls="form-label small fw-semibold mt-2"),
             Input(id="fellowship_topic", maxlength="200", cls="form-control mb-3"),
-            Button("Save attendance on this device", type="button", id="btn-save-fellowship-attendance", cls="btn btn-primary w-100 rounded-pill"),
+            Button("Save attendance", type="button", id="btn-save-fellowship-attendance", cls="btn btn-primary rounded-pill px-4"),
             cls="dclm-card mb-3 p-3",
         )
         finance = Card(
@@ -38,7 +37,7 @@ def setup_fellowship_routes(app: Any) -> None:
             Input(id="fellowship_offering_amount", type="number", min="0.01", max="9999999999.99", step="0.01", inputmode="decimal", cls="form-control mb-2", required=True),
             Label("Note (optional)", for_="fellowship_offering_note", cls="form-label small fw-semibold"),
             Input(id="fellowship_offering_note", maxlength="500", cls="form-control mb-3"),
-            Button("Save offering on this device", type="button", id="btn-save-fellowship-offering", cls="btn btn-success w-100 rounded-pill"),
+            Button("Save offering", type="button", id="btn-save-fellowship-offering", cls="btn btn-success rounded-pill px-4"),
             cls="dclm-card mb-3 p-3",
         )
         member = Card(
@@ -46,15 +45,12 @@ def setup_fellowship_routes(app: Any) -> None:
             P("Only collect details needed to connect this person with the fellowship.", cls="text-muted small"),
             Label("Full name", for_="fellowship_member_name", cls="form-label small fw-semibold"),
             Input(id="fellowship_member_name", maxlength="120", cls="form-control mb-2", required=True),
-            Label("Fellowship group", for_="fellowship_group", cls="form-label small fw-semibold"),
-            Select(Option("Select a group", value=""), *[Option(label, value=key) for key, label in FELLOWSHIP_GROUPS],
-                   id="fellowship_group", cls="form-select mb-2", required=True),
             Label("Phone (optional)", for_="fellowship_member_phone", cls="form-label small fw-semibold"),
             Input(id="fellowship_member_phone", type="tel", maxlength="30", cls="form-control mb-3"),
             Label("Home address", for_="fellowship_member_address", cls="form-label small fw-semibold"),
             Input(id="fellowship_member_address", maxlength="300", autocomplete="street-address",
                   cls="form-control mb-3", required=True),
-            Button("Save member on this device", type="button", id="btn-save-fellowship-member", cls="btn btn-outline-primary w-100 rounded-pill"),
+            Button("Save member", type="button", id="btn-save-fellowship-member", cls="btn btn-outline-primary rounded-pill px-4"),
             cls="dclm-card mb-3 p-3",
         )
         return app_shell(
@@ -62,7 +58,7 @@ def setup_fellowship_routes(app: Any) -> None:
             subtitle="Capture one report at a time for an authorized house fellowship.",
             content=Div(
                 Card(Label("Fellowship", for_="fellowship_id", cls="form-label small fw-semibold"), select,
-                     Small("Choose the authorized fellowship. Member group is selected separately in member intake.", cls="text-muted d-block mt-2"),
+                     Small("Choose the authorized fellowship. Its preassigned category applies to all new members.", cls="text-muted d-block mt-2"),
                      cls="dclm-card mb-3 p-3"),
                 attendance, finance, member, id="fellowship-content-wrap",
             ),

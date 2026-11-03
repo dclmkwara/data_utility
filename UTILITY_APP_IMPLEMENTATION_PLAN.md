@@ -59,7 +59,7 @@ If these decisions require backend changes, make them as part of the relevant ph
 
 **Current phase state:** Phase 0 decisions are documented; live permission and report owner review remain. Phases 1-7 have implementation work in place but remain open pending their acceptance gates. Phase 8 remains open. Live Church_server account/event verification, section-level attribution, full queue/reconnect behavior, complete offline workflow coverage, and state-report reconciliation remain outstanding.
 
-### Phase 0 â€” Freeze field workflow and API contracts
+### Phase 0 — Freeze field workflow and API contracts
 
 **Priority:** P0; prerequisite for the data-path work.
 
@@ -73,7 +73,7 @@ If these decisions require backend changes, make them as part of the relevant ph
 
 **Complete when** request/response fixtures cover weekly service, combined event, offline retry, and item rejection; account permission cases are verified; and no UI/sync behavior trusts only a client-supplied location code or display label.
 
-### Phase 1 â€” Authentication, actor identity, and authorized scope
+### Phase 1 — Authentication, actor identity, and authorized scope
 
 **Priority:** P0; unlocks every real backend workflow.
 
@@ -87,7 +87,7 @@ If these decisions require backend changes, make them as part of the relevant ph
 
 **Complete when** an approved field account can read only its permitted roster/events and sync only allowed locations; an unapproved, expired, or out-of-scope account gets a clear denial and no records are accepted. Tests cover these permission cases.
 
-### Phase 2 â€” Event and location bootstrap
+### Phase 2 — Event and location bootstrap
 
 **Priority:** P0; required before a record can be valid.
 
@@ -101,7 +101,7 @@ If these decisions require backend changes, make them as part of the relevant ph
 
 **Complete when** every queued record carries the correct `event_id`, location, and any required assignment; malformed, closed, unknown, or out-of-scope events fail with recoverable, specific errors. Verify weekly, crusade/subprogram, retreat, and combined-service fixtures.
 
-### Phase 3 â€” Safe offline queue and lossless sync
+### Phase 3 — Safe offline queue and lossless sync
 
 **Priority:** P0; data integrity gate.
 
@@ -117,9 +117,9 @@ If these decisions require backend changes, make them as part of the relevant ph
 
 **Complete when** mixed success/error responses preserve only failed items; timeout/retry produces no duplicates; duplicate acknowledgement is safe; batches above 500 records process across chunks; browser restart preserves pending data; and every displayed success matches backend item outcomes.
 
-### Phase 4 â€” Real roster and attendance workflow
+### Phase 4 — Real roster and attendance workflow
 
-**Priority:** P1 after Phases 1â€“3.
+**Priority:** P1 after Phases 1–3.
 
 **Work**
 
@@ -131,7 +131,7 @@ If these decisions require backend changes, make them as part of the relevant ph
 
 **Complete when** the roster contains only authorized real workers; an empty roster remains empty; unavailable service shows a recoverable error; cached roster is correctly labeled; and attendance is attached to the selected event and accepted only for valid workers.
 
-### Phase 5 â€” Count, registration, and finance correctness
+### Phase 5 — Count, registration, and finance correctness
 
 **Priority:** P1; can begin after event bootstrap is stable.
 
@@ -144,7 +144,7 @@ If these decisions require backend changes, make them as part of the relevant ph
 
 **Newcomer and convert registration**
 
-- Validate required fields and phone normalization; cap field lengths; distinguish â€œsaved on this deviceâ€ from â€œaccepted by Church_server.â€
+- Validate required fields and phone normalization; cap field lengths; distinguish 'saved on this device' from 'accepted by the church records service.'
 - Review which address, work/school, marital, social, and salvation fields are genuinely needed at initial capture. Keep follow-up-sensitive fields optional where policy permits.
 - Include event/location IDs and stable client ID, and map fields to backend record schemas with fixtures.
 
@@ -156,7 +156,7 @@ If these decisions require backend changes, make them as part of the relevant ph
 
 **Complete when** captured values round-trip into the expected backend tables and state-level reports; validation errors stay visible in the queue; and a representative can distinguish captured, synced, and reviewed financial records.
 
-### Phase 6 â€” Offline behavior and local data protection
+### Phase 6 — Offline behavior and local data protection
 
 **Priority:** P1; core product requirement.
 
@@ -171,9 +171,9 @@ If these decisions require backend changes, make them as part of the relevant ph
 
 **Complete when** an installed app can cold-start in airplane mode after a successful online install; every capture workflow works offline against a previously authorized event; data survives reload/restart; stale/out-of-scope data is not misrepresented; and sign-out/retention behavior is verified on a shared-device scenario.
 
-### Phase 7 â€” Faststrap workflow UI and visual refinement
+### Phase 7 — Faststrap workflow UI and visual refinement
 
-**Priority:** P2, but establish shared components early so Phases 1â€“6 use them consistently.
+**Priority:** P2, but establish shared components early so Phases 1–6 use them consistently.
 
 **Design direction**
 
@@ -193,7 +193,7 @@ Before adopting mobile/beta or recently added components, verify their signature
 
 **Complete when** mobile views at 360px, 390px, and tablet width have no horizontal overflow; all actions work by keyboard and touch; setup/scope remains visible; the top view prioritizes the next field task; loading/empty/error/offline/success states are distinct; and branding matches the Church_server design tokens without sacrificing field readability.
 
-### Phase 8 â€” Contract, workflow, and release verification
+### Phase 8 — Contract, workflow, and release verification
 
 **Priority:** P0 release gate; verification begins in each phase and closes here.
 
@@ -202,7 +202,7 @@ Before adopting mobile/beta or recently added components, verify their signature
 - Backend contract fixtures for each payload and nested response, including per-item errors, duplicates, invalid event, invalid location, and auth denial.
 - Utility tests for identity/bootstrap validation, IDB migration, stable IDs, outbox transitions, event/location immutability, count additive behavior, and offline cache matching.
 - Security tests for role/scope enforcement, unauthenticated proxy endpoints, unsafe HTML payloads, local retention/sign-out, and no sensitive tokens or PII in logs.
-- Browser workflow checks for login â†’ event/location selection â†’ count sections from multiple ushers â†’ attendance review â†’ registration/finance capture â†’ offline restart â†’ online partial sync â†’ retry â†’ confirmed state.
+- Browser workflow checks for login, event/location selection, multi-usher counts, attendance review, registration/finance capture, offline restart, partial sync, retry, and confirmed state.
 - Browser visual/accessibility checks at mobile and tablet widths; screen reader/focus/zoom and reduced-motion spot checks.
 
 **Release acceptance**
@@ -217,14 +217,14 @@ Before adopting mobile/beta or recently added components, verify their signature
 
 ## 5. Implementation slices and current state
 
-1. **Slice A â€” contract:** roles, event provisioning, additive usher submissions, offering mapping, registration fields, location UUID versus display ID, and fellowship eventless payloads are documented. Sample full backend fixtures and owner approval for retention/consent remain.
-2. **Slice B â€” identity and backend access:** authenticated proxy, encrypted session cookie, server-assigned location UUID resolution, fail-closed routes, and real roster states are implemented. Real approved-account permissions and expiry behavior remain to verify.
-3. **Slice C â€” event context:** event discovery, required event IDs, assignment checks, and immutable queued context are implemented. Multi-event authorized offline caching and combined-service browser workflows remain open.
-4. **Slice D â€” sync integrity:** per-item acknowledgement, bounded chunks, retry metadata, stable IDs, and account-scoped IndexedDB are implemented. Browser coverage for mixed outcomes, interruption between chunks, and retry remains.
-5. **Slice E â€” domain capture:** additive counts, event-bound attendance, registration validation, decimal finance validation, and separate fellowship attendance/offering/member capture are implemented. The backend has no count-section identifier; explicit usher-section reporting and state-report reconciliation remain.
-6. **Slice F â€” offline and privacy:** root-scoped service worker, versioned asset cache, offline shell, local drafts, and account partitioning are implemented. Offline checks for all workflows, reconnect sync, retention policy, and local-storage protection remain.
-7. **Slice G â€” visual/accessibility refinement:** responsive header/identity bar, keyboard-accessible count tiles, focus states, zoom, and reduced-motion adjustments are implemented. Complete route-by-route accessibility review and real-device testing remain.
-8. **Slice H â€” acceptance:** live backend and release acceptance gates remain open; no Church_server data was submitted during this implementation.
+1. **Slice A — contract:** roles, event provisioning, additive usher submissions, offering mapping, registration fields, location UUID versus display ID, and fellowship eventless payloads are documented. Sample full backend fixtures and owner approval for retention/consent remain.
+2. **Slice B — identity and backend access:** authenticated proxy, encrypted session cookie, server-assigned location UUID resolution, fail-closed routes, and real roster states are implemented. Real approved-account permissions and expiry behavior remain to verify.
+3. **Slice C — event context:** event discovery, required event IDs, assignment checks, and immutable queued context are implemented. Multi-event authorized offline caching and combined-service browser workflows remain open.
+4. **Slice D — sync integrity:** per-item acknowledgement, bounded chunks, retry metadata, stable IDs, and account-scoped IndexedDB are implemented. Browser coverage for mixed outcomes, interruption between chunks, and retry remains.
+5. **Slice E — domain capture:** additive counts, event-bound attendance, registration validation, decimal finance validation, and separate fellowship attendance/offering/member capture are implemented. The backend has no count-section identifier; explicit usher-section reporting and state-report reconciliation remain.
+6. **Slice F — offline and privacy:** root-scoped service worker, versioned asset cache, offline shell, local drafts, and account partitioning are implemented. Offline checks for all workflows, reconnect sync, retention policy, and local-storage protection remain.
+7. **Slice G — visual/accessibility refinement:** responsive header/identity bar, keyboard-accessible count tiles, focus states, zoom, and reduced-motion adjustments are implemented. Complete route-by-route accessibility review and real-device testing remain.
+8. **Slice H — acceptance:** live backend and release acceptance gates remain open; no Church_server data was submitted during this implementation.
 
 Each slice should update this document with changed files, tests/evidence, and any still-open acceptance criteria. Do not mark a phase complete based only on routes rendering or a successful HTTP status; require the phase's behavior and data integrity gate.
 

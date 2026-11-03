@@ -199,7 +199,11 @@ class BackendClient:
                     return {
                         "ok": False,
                         "status_code": resp.status_code,
-                        "error": "Your field session has expired. Sign in again to continue syncing.",
+                        "error": (
+                            "Your sign-in has expired. Sign in again to continue syncing."
+                            if resp.status_code == 401
+                            else "This account is not authorized to submit these church records. Contact your administrator."
+                        ),
                     }
                 elif resp.status_code != 404:
                     return {
