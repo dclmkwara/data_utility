@@ -5,7 +5,7 @@
 
 const DCLM_DB = (function () {
   const DB_NAME = "dclm_field_utility_db";
-  const DB_VERSION = 7;
+  const DB_VERSION = 8;
 
   const STORES = {
     active_setup: "key",             // Active Ecclesiastical Identity
@@ -14,6 +14,7 @@ const DCLM_DB = (function () {
     offerings_queue: "client_id",     // Unsubmitted Offerings & Tithes
     attendance_queue: "client_id",    // Unsubmitted Marked Attendance
     registration_queue: "client_id",  // Unsubmitted Converts & Newcomers
+    worker_candidates_queue: "client_id",
     fellowship_members_queue: "client_id",
     fellowship_attendance_queue: "client_id",
     fellowship_offerings_queue: "client_id",
@@ -227,7 +228,7 @@ const DCLM_DB = (function () {
       return performTx(storeName, "readonly", (store) => {
         return reqToPromise(store.getAll()).then((items) => items
           .filter((item) => item.owner_id === ownerId)
-          .map((item) => ["counts_queue", "offerings_queue", "attendance_queue", "registration_queue", "fellowship_members_queue", "fellowship_attendance_queue", "fellowship_offerings_queue"].includes(storeName)
+          .map((item) => ["counts_queue", "offerings_queue", "attendance_queue", "registration_queue", "worker_candidates_queue", "fellowship_members_queue", "fellowship_attendance_queue", "fellowship_offerings_queue"].includes(storeName)
             ? {
               ...item,
               status: item.status === "syncing" ? "pending" : (item.status || "pending"),
@@ -330,7 +331,7 @@ const DCLM_DB = (function () {
     },
 
     async getUnassignedQueueCount() {
-      const queueNames = ["counts_queue", "offerings_queue", "attendance_queue", "registration_queue", "fellowship_members_queue", "fellowship_attendance_queue", "fellowship_offerings_queue"];
+      const queueNames = ["counts_queue", "offerings_queue", "attendance_queue", "registration_queue", "worker_candidates_queue", "fellowship_members_queue", "fellowship_attendance_queue", "fellowship_offerings_queue"];
       const db = await openDatabase();
       const ownerId = currentOwnerId();
       if (!ownerId) return 0;
@@ -349,7 +350,7 @@ const DCLM_DB = (function () {
     async claimUnassignedQueueItems() {
       const ownerId = currentOwnerId();
       if (!ownerId) throw new Error("Sign in before assigning saved records.");
-      const queueNames = ["counts_queue", "offerings_queue", "attendance_queue", "registration_queue", "fellowship_members_queue", "fellowship_attendance_queue", "fellowship_offerings_queue"];
+      const queueNames = ["counts_queue", "offerings_queue", "attendance_queue", "registration_queue", "worker_candidates_queue", "fellowship_members_queue", "fellowship_attendance_queue", "fellowship_offerings_queue"];
       const db = await openDatabase();
       return new Promise((resolve, reject) => {
         const tx = db.transaction(queueNames, "readwrite");
@@ -462,6 +463,7 @@ const DCLM_DB = (function () {
       const offerings = await this.getAllFromQueue("offerings_queue");
       const attendance = await this.getAllFromQueue("attendance_queue");
       const registrations = await this.getAllFromQueue("registration_queue");
+      const workerCandidates = await this.getAllFromQueue("worker_candidates_queue");
       const fellowshipMembers = await this.getAllFromQueue("fellowship_members_queue");
       const fellowshipAttendance = await this.getAllFromQueue("fellowship_attendance_queue");
       const fellowshipOfferings = await this.getAllFromQueue("fellowship_offerings_queue");
@@ -471,10 +473,11 @@ const DCLM_DB = (function () {
         offerings: offerings.length,
         attendance: attendance.length,
         registrations: registrations.length,
+        worker_candidates: workerCandidates.length,
         fellowship_members: fellowshipMembers.length,
         fellowship_attendance: fellowshipAttendance.length,
         fellowship_offerings: fellowshipOfferings.length,
-        total: counts.length + offerings.length + attendance.length + registrations.length
+        total: counts.length + offerings.length + attendance.length + registrations.length + workerCandidates.length
           + fellowshipMembers.length + fellowshipAttendance.length + fellowshipOfferings.length,
       };
     },

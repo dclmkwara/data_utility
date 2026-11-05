@@ -3,7 +3,7 @@
  * Cache-first strategy for app shell and assets
  */
 
-const CACHE_NAME = "dclm-utility-v27";
+const CACHE_NAME = "dclm-utility-v33";
 const ASSETS_TO_CACHE = [
   "/",
   "/login",
@@ -15,7 +15,7 @@ const ASSETS_TO_CACHE = [
   "/queues",
   "/fellowship",
   "/information",
-  "/assets/css/utility.css?v=12",
+  "/assets/css/utility.css?v=13",
   "/static/css/bootstrap.min.css",
   "/static/css/bootstrap-icons.min.css",
   "/static/css/fonts/bootstrap-icons.woff2?dd67030699838ea613ee6dbda90effa6",
@@ -27,11 +27,11 @@ const ASSETS_TO_CACHE = [
   "/static/js/faststrap-htmx.js",
   "/static/js/faststrap-init.js",
   "/static/favicon.svg",
-  "/assets/js/db.js?v=11",
+  "/assets/js/db.js?v=12",
   "/assets/js/auth.js?v=4",
   "/assets/js/haptics.js?v=5",
-  "/assets/js/sync.js?v=12",
-  "/assets/js/app.js?v=20",
+  "/assets/js/sync.js?v=13",
+  "/assets/js/app.js?v=26",
   "/assets/manifest.json",
   "/assets/favicon.png",
   "/assets/icon-192.png",

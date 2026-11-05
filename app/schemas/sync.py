@@ -58,6 +58,18 @@ class WorkerAttendanceSubmissionItem(BaseModel):
     submitted_by_worker_id: str | None = None
 
 
+class WorkerCandidateItem(BaseModel):
+    client_id: str
+    name: str
+    gender: str
+    phone: str
+    email: str
+    unit: str
+    address: str | None = None
+    occupation: str | None = None
+    marital_status: str | None = None
+
+
 class SyncBatchPayload(BaseModel):
     """Batch upload payload sent to Church_server /api/v1/sync."""
     counts: list[CountItem] = Field(default_factory=list)
@@ -65,6 +77,7 @@ class SyncBatchPayload(BaseModel):
     records: list[RecordItem] = Field(default_factory=list)
     worker_attendance: list[WorkerAttendanceItem] = Field(default_factory=list)
     worker_attendance_submissions: list[WorkerAttendanceSubmissionItem] = Field(default_factory=list)
+    worker_candidates: list[WorkerCandidateItem] = Field(default_factory=list)
     fellowship_members: list[FellowshipMemberItem] = Field(default_factory=list)
     fellowship_attendance: list[FellowshipAttendanceItem] = Field(default_factory=list)
     fellowship_offerings: list[FellowshipOfferingItem] = Field(default_factory=list)
@@ -83,6 +96,7 @@ class SyncBatchResponseSummary(BaseModel):
     records: SyncTypeResult = Field(default_factory=SyncTypeResult)
     worker_attendance: SyncTypeResult = Field(default_factory=SyncTypeResult)
     worker_attendance_submissions: SyncTypeResult = Field(default_factory=SyncTypeResult)
+    worker_candidates: SyncTypeResult = Field(default_factory=SyncTypeResult)
     fellowship_members: SyncTypeResult = Field(default_factory=SyncTypeResult)
     fellowship_attendance: SyncTypeResult = Field(default_factory=SyncTypeResult)
     fellowship_offerings: SyncTypeResult = Field(default_factory=SyncTypeResult)

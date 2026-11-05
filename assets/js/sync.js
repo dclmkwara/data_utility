@@ -4,6 +4,7 @@ const DCLM_SYNC = (function () {
     ["counts_queue", "counts", "Headcount"],
     ["offerings_queue", "offerings", "Offering"],
     ["registration_queue", "records", "Registration"],
+    ["worker_candidates_queue", "worker_candidates", "Worker Candidate"],
     ["attendance_queue", "worker_attendance_submissions", "Attendance"],
     ["fellowship_members_queue", "fellowship_members", "Fellowship Member"],
     ["fellowship_attendance_queue", "fellowship_attendance", "Fellowship Attendance"],
@@ -115,9 +116,21 @@ const DCLM_SYNC = (function () {
       client_id: item.client_id, fellowship_id: item.fellowship_id,
       date: item.date, amount: String(item.amount), note: item.note || null,
     };
+    if (group.field === "worker_candidates") return {
+      client_id: item.client_id,
+      name: item.name,
+      gender: item.gender,
+      phone: item.phone,
+      email: item.email,
+      unit: item.unit,
+      address: item.address || null,
+      occupation: item.occupation || null,
+      marital_status: item.marital_status || null,
+    };
     if (group.field === "counts") return {
       client_id: item.client_id, event_id: item.event_id || null, location_id: item.location_id,
       date: `${item.service_date}T00:00:00Z`, church_type: item.church_type,
+      program_level: item.program_level || "Local",
       program_domain: item.program_domain, program_type: item.program_type,
       assignment_id: item.assignment_id || null,
       adult_male: Number(item.adult_male || 0), adult_female: Number(item.adult_female || 0),
@@ -128,6 +141,7 @@ const DCLM_SYNC = (function () {
     if (group.field === "offerings") return {
       client_id: item.client_id, event_id: item.event_id || null, location_id: item.location_id,
       date: `${item.service_date}T00:00:00Z`, church_type: item.church_type,
+      program_level: item.program_level || "Local",
       program_domain: item.program_domain, program_type: item.program_type,
       amount: String(item.amount), payment_method: item.payment_method || "cash",
       fund_type: item.fund_type || "offering", note: item.note || null,
@@ -135,6 +149,7 @@ const DCLM_SYNC = (function () {
     if (group.field === "records") return {
       client_id: item.client_id, event_id: item.event_id || null, location_id: item.location_id,
       date: `${item.service_date}T00:00:00Z`, church_type: item.church_type,
+      program_level: item.program_level || "Local",
       program_domain: item.program_domain, program_type: item.program_type,
       assignment_id: item.assignment_id || null,
       record_type: item.record_type, name: item.name, gender: item.gender, phone: item.phone,
@@ -142,7 +157,9 @@ const DCLM_SYNC = (function () {
     };
     if (group.field === "worker_attendance_submissions") return {
       client_id: item.client_id, event_id: item.event_id || null, location_id: item.location_id,
+      assignment_id: item.assignment_id || null,
       date: `${item.service_date}T00:00:00Z`, church_type: item.church_type,
+      program_level: item.program_level || "Local",
       program_domain: item.program_domain, program_type: item.program_type,
       expected_workers_count: Number(item.expected_workers_count || 0),
       present_workers: (item.present_workers || []).map((worker) => ({
@@ -154,6 +171,7 @@ const DCLM_SYNC = (function () {
     return {
       client_id: item.client_id, event_id: item.event_id || null, location_id: item.location_id,
       date: `${item.service_date}T00:00:00Z`, church_type: item.church_type,
+      program_level: item.program_level || "Local",
       program_domain: item.program_domain, program_type: item.program_type,
       worker_id: item.worker_id,
       // Queue lifecycle values (pending/syncing) are never valid attendance statuses.
@@ -178,7 +196,7 @@ const DCLM_SYNC = (function () {
       DCLM_APP.showToast("No pending records to sync.", "info");
       return { ok: true, synced: 0 };
     }
-    const needsEditNotice = entries.some(({ group }) => ["offerings", "worker_attendance_submissions", "fellowship_attendance", "fellowship_offerings"].includes(group.field));
+    const needsEditNotice = entries.some(({ group }) => ["offerings", "worker_attendance_submissions", "worker_candidates", "fellowship_attendance", "fellowship_offerings"].includes(group.field));
     if (needsEditNotice && !(await window.DCLM_APP.confirm("Some offering and attendance records are included. Editing them after submission requires elevated approval. Continue with submission?", { title: "Confirm submission", confirmLabel: "Submit all" }))) {
       return { ok: false, cancelled: true };
     }
@@ -187,7 +205,9 @@ const DCLM_SYNC = (function () {
     let failed = 0;
     for (const entry of entries) {
       const fellowshipEntry = entry.group.field.startsWith("fellowship_");
-      if (!entry.item.client_id || (fellowshipEntry
+      if (!entry.item.client_id || (entry.group.field === "worker_candidates"
+        ? (!entry.item.name || !entry.item.gender || !entry.item.phone || !entry.item.email || !entry.item.unit)
+        : fellowshipEntry
         ? !entry.item.fellowship_id
         : (!entry.item.location_id || !entry.item.service_date || !entry.item.program_type || !entry.item.church_type
           || (!entry.item.event_id && !entry.item.program_domain)
@@ -195,7 +215,9 @@ const DCLM_SYNC = (function () {
         failed += 1;
         await DCLM_DB.addToQueue(entry.group.store, {
           ...entry.item,
-          last_error: fellowshipEntry
+          last_error: entry.group.field === "worker_candidates"
+            ? "Add the worker candidate's name, gender, phone, email, and unit before syncing."
+            : fellowshipEntry
             ? "Select an authorized fellowship before syncing this record."
             : "Add the location, service date, program type, and required scheduled event before syncing.",
         });
@@ -261,6 +283,7 @@ const DCLM_SYNC = (function () {
           }
           await DCLM_DB.addToQueue("recent_submissions", {
             client_id: item.client_id, type: group.label, synced_at: now, outcome: outcome.status,
+            worker_id: item.worker_id || item.id || null,
             location_id: item.location_id, service_date: item.service_date || null,
             event_id: item.event_id, context_key: item.context_key || null, worker_id: item.worker_id || null,
           });

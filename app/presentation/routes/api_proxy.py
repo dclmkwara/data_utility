@@ -236,30 +236,75 @@ def setup_api_proxy_routes(app: Any) -> None:
                 event.get("event_mode") == "crusade"
                 and str(event.get("alpha_location_id") or "") == location_id.strip()
             )
-            if not is_alpha_crusade:
-                return JSONResponse({"ok": True, "required": False, "count_assignments": [], "convert_assignments": []})
             assignments = await backend_client.get_event_assignments(event_id, session["access_token"])
+            requires_assignment = (
+                is_alpha_crusade
+                or str(event.get("reporting_scope") or "location").lower() in {"group", "region", "state"}
+                or any(item.get("status") not in {"rejected", "revoked"} for item in assignments)
+            )
+            if not requires_assignment:
+                return JSONResponse({"ok": True, "required": False, "requires_attendance": False, "count_assignments": [], "convert_assignments": [], "attendance_assignments": []})
             worker_id = str(session.get("user", {}).get("worker_id") or "")
             own = [
                 item for item in assignments
                 if str(item.get("worker_id") or "") == worker_id
                 and item.get("status") == "approved"
             ]
-            count_assignments = [
-                {"assignment_id": str(item.get("id")), "label": str(item.get("assignment_label") or "Count assignment")}
-                for item in own if item.get("assignment_type") in {"count", "both"}
-            ]
             convert_assignments = [
                 {"assignment_id": str(item.get("id")), "label": str(item.get("assignment_label") or "Convert assignment")}
-                for item in own if item.get("assignment_type") in {"convert", "both"}
+                for item in own if item.get("assignment_type") in {"convert", "both", "all"}
             ]
+            count_assignments = [
+                {"assignment_id": str(item.get("id")), "label": str(item.get("assignment_label") or "Count assignment")}
+                for item in own if item.get("assignment_type") in {"count", "both", "all"}
+            ]
+            attendance_assignments = [
+                {"assignment_id": str(item.get("id")), "label": str(item.get("assignment_label") or "Attendance assignment")}
+                for item in own if item.get("assignment_type") in {"attendance", "all"}
+            ]
+            is_combined_meeting = str(event.get("reporting_scope") or "location").lower() in {"group", "region", "state"}
             return JSONResponse({
                 "ok": True, "required": True,
+                "requires_attendance": is_combined_meeting,
                 "count_assignments": count_assignments,
                 "convert_assignments": convert_assignments,
+                "attendance_assignments": attendance_assignments,
             })
         except Exception as exc:
             return _response_error(exc)
+
+    @app.get("/api/events/{event_id}/attendance-roster")
+    async def get_combined_attendance_roster(request: Request, event_id: str):
+        session = _session(request)
+        if not session:
+            return JSONResponse({"ok": False, "error": "Sign in to load the assigned meeting roster."}, status_code=401)
+        try:
+            items = await backend_client.get_event_attendance_roster(event_id, session["access_token"])
+        except Exception as exc:
+            return _response_error(exc)
+        return JSONResponse({"ok": True, "source": "assigned-event", "items": items})
+
+    @app.get("/api/events/assigned-to-me")
+    async def get_my_active_event_assignments(request: Request):
+        session = _session(request)
+        if not session:
+            return JSONResponse({"ok": False, "error": "Sign in to load your assigned program setup."}, status_code=401)
+        try:
+            items = await backend_client.get_my_active_event_assignments(session["access_token"])
+        except Exception as exc:
+            return _response_error(exc)
+        return JSONResponse({"ok": True, "source": "approved-active-assignments", "items": items})
+
+    @app.get("/api/information/latest")
+    async def get_latest_information(request: Request):
+        session = _session(request)
+        if not session:
+            return JSONResponse({"ok": False, "error": "Sign in to load the weekly information sheet."}, status_code=401)
+        try:
+            item = await backend_client.get_latest_information(session["access_token"])
+        except Exception as exc:
+            return _response_error(exc)
+        return JSONResponse({"ok": True, "source": "backend", "item": item})
 
     @app.post("/api/sync")
     async def proxy_sync(request: Request):
@@ -274,17 +319,19 @@ def setup_api_proxy_routes(app: Any) -> None:
             return JSONResponse({"ok": False, "error": "Sync payload must be a JSON object."}, status_code=400)
         resource_names = (
             "counts", "offerings", "records", "worker_attendance", "worker_attendance_submissions",
-            "fellowship_members", "fellowship_attendance", "fellowship_offerings",
+            "worker_candidates", "fellowship_members", "fellowship_attendance", "fellowship_offerings",
         )
-        total = 0
+        total = sum(len(body.get(name, [])) for name in resource_names if isinstance(body.get(name, []), list))
+        if total > 500:
+            return JSONResponse({"ok": False, "error": "Sync accepts at most 500 records per request. Retry in smaller batches."}, status_code=413)
         for resource_name in resource_names:
             items = body.get(resource_name, [])
             if not isinstance(items, list):
                 return JSONResponse({"ok": False, "error": f"{resource_name} must be a list."}, status_code=400)
-            total += len(items)
             for index, item in enumerate(items):
                 event_resource = resource_name in {"counts", "offerings", "records", "worker_attendance", "worker_attendance_submissions"}
-                identity_keys = ("client_id", "location_id") if event_resource else ("client_id", "fellowship_id")
+                identity_keys = (("client_id",) if resource_name == "worker_candidates" else
+                                 ("client_id", "location_id") if event_resource else ("client_id", "fellowship_id"))
                 if not isinstance(item, dict) or any(not item.get(key) for key in identity_keys):
                     return JSONResponse({
                         "ok": False,
@@ -296,7 +343,7 @@ def setup_api_proxy_routes(app: Any) -> None:
                         UUID(str(item["location_id"]))
                         if item.get("event_id"):
                             UUID(str(item["event_id"]))
-                    else:
+                    elif resource_name != "worker_candidates":
                         UUID(str(item["fellowship_id"]))
                 except (ValueError, TypeError, AttributeError):
                     return JSONResponse({"ok": False, "error": f"{resource_name}[{index}] contains an invalid UUID."}, status_code=422)
@@ -305,8 +352,8 @@ def setup_api_proxy_routes(app: Any) -> None:
                         date.fromisoformat(str(item.get("date") or "")[:10])
                     except ValueError:
                         return JSONResponse({"ok": False, "error": f"{resource_name}[{index}] requires a valid service date."}, status_code=422)
-                    if not item.get("program_type") or not item.get("church_type"):
-                        return JSONResponse({"ok": False, "error": f"{resource_name}[{index}] requires church section and program type metadata."}, status_code=422)
+                    if not item.get("program_type") or not item.get("church_type") or item.get("program_level") not in {"Local", "Group", "Region", "State", "National", "Global"}:
+                        return JSONResponse({"ok": False, "error": f"{resource_name}[{index}] requires valid church section, program level, and program type metadata."}, status_code=422)
                     if not item.get("event_id") and not item.get("program_domain"):
                         return JSONResponse({"ok": False, "error": f"{resource_name}[{index}] requires a program domain when no scheduled event is selected."}, status_code=422)
                     if str(item.get("program_domain") or "").lower() == "crusade" and not item.get("event_id"):
@@ -341,6 +388,13 @@ def setup_api_proxy_routes(app: Any) -> None:
                     if (not name or len(name) > 120 or len(str(item.get("phone") or "")) > 30
                             or not address or len(address) > 300):
                         return JSONResponse({"ok": False, "error": f"fellowship_members[{index}] requires a valid name and home address; phone must be 30 characters or fewer."}, status_code=422)
+                if resource_name == "worker_candidates":
+                    name = str(item.get("name") or "").strip()
+                    phone = str(item.get("phone") or "").strip()
+                    email = str(item.get("email") or "").strip()
+                    if (not name or len(name) > 255 or len(phone) < 7 or len(phone) > 30
+                            or "@" not in email or len(email) > 254 or not item.get("gender") or not item.get("unit")):
+                        return JSONResponse({"ok": False, "error": f"worker_candidates[{index}] requires name, gender, valid phone, email, and unit."}, status_code=422)
                 if resource_name == "fellowship_offerings":
                     try:
                         amount = float(item.get("amount"))
@@ -348,8 +402,6 @@ def setup_api_proxy_routes(app: Any) -> None:
                         amount = 0
                     if not amount > 0 or amount > 9999999999.99:
                         return JSONResponse({"ok": False, "error": f"fellowship_offerings[{index}] requires a positive amount."}, status_code=422)
-        if total > 500:
-            return JSONResponse({"ok": False, "error": "Sync accepts at most 500 records per request. Retry in smaller batches."}, status_code=413)
         refreshed_cookie = None
         try:
             result = await backend_client.push_sync_batch(body, session["access_token"])

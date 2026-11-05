@@ -19,6 +19,7 @@ from app.schemas.counts import CountItem
 from app.schemas.offerings import OfferingItem
 from app.schemas.records import RecordItem
 from app.schemas.attendance import WorkerAttendanceItem
+from app.core.constants import PROGRAM_DOMAINS, PROGRAM_TYPES_BY_DOMAIN, PROGRAM_LEVELS
 from app.schemas.counts import CountItem
 from app.schemas.offerings import OfferingItem
 from app.schemas.records import RecordItem
@@ -27,6 +28,12 @@ from app.services.backend_client import BackendClient
 
 app = create_app()
 client = TestClient(app)
+
+
+def test_capture_taxonomy_matches_canonical_domains_and_levels():
+    assert [key for key, _ in PROGRAM_DOMAINS] == ["Weekly", "Crusade", "Retreat", "Conference", "Special"]
+    assert "Home Caring Fellowship" not in {item for options in PROGRAM_TYPES_BY_DOMAIN.values() for item in options}
+    assert dict(PROGRAM_LEVELS)["Local"].startswith("Location scope (pastoral level 2)")
 
 
 def test_core_routes_render():
@@ -47,6 +54,71 @@ def test_core_routes_render():
         response = client.get(path)
         assert response.status_code == 200, f"Path {path} returned {response.status_code}"
         assert "DCLM" in response.text
+
+
+def test_information_sheet_is_backend_driven_and_proxy_requires_session():
+    page = client.get("/information")
+    assert page.status_code == 200
+    assert 'id="info-sws-reading"' in page.text
+    assert "/api/information/latest" in page.text
+    assert "The Believer's Heavenly Walk and Warfare" not in page.text
+
+    response = client.get("/api/information/latest")
+    assert response.status_code == 401
+    assert response.json()["ok"] is False
+
+
+def test_active_assignment_proxy_requires_session_and_returns_backend_assignments(monkeypatch):
+    response = client.get("/api/events/assigned-to-me")
+    assert response.status_code == 401
+
+    test_client = _authenticated_client(monkeypatch)
+    expected = [{"assignment_id": "assignment-1", "event": {"id": "event-1"}}]
+    fetch = AsyncMock(return_value=expected)
+    monkeypatch.setattr(backend_client, "get_my_active_event_assignments", fetch)
+    response = test_client.get("/api/events/assigned-to-me")
+    assert response.status_code == 200
+    assert response.json()["items"] == expected
+    fetch.assert_awaited_once()
+
+
+def test_assigned_event_restricts_location_capture_to_approved_assignee(monkeypatch):
+    test_client = _authenticated_client(monkeypatch)
+    monkeypatch.setattr(backend_client, "get_event", AsyncMock(return_value={
+        "id": "event-1", "event_mode": "regular", "reporting_scope": "location", "alpha_location_id": None,
+    }))
+    monkeypatch.setattr(backend_client, "get_event_assignments", AsyncMock(return_value=[{
+        "id": "assignment-1", "worker_id": "worker-1", "status": "pending", "assignment_type": "count",
+    }]))
+    pending = test_client.get("/api/events/event-1/field-assignments?location_id=11111111-1111-4111-8111-111111111111")
+    assert pending.status_code == 200
+    assert pending.json()["required"] is True
+    assert pending.json()["count_assignments"] == []
+
+    monkeypatch.setattr(backend_client, "get_event_assignments", AsyncMock(return_value=[{
+        "id": "assignment-1", "worker_id": "worker-1", "status": "approved", "assignment_type": "count",
+    }]))
+    approved = test_client.get("/api/events/event-1/field-assignments?location_id=11111111-1111-4111-8111-111111111111")
+    assert approved.json()["count_assignments"] == [{"assignment_id": "assignment-1", "label": "Count assignment"}]
+
+
+def test_setup_exposes_editable_reporting_scope_and_keeps_collection_location_readonly():
+    setup_page = client.get("/setup")
+    assert setup_page.status_code == 200
+    assert 'id="page_reporting_scope_code"' in setup_page.text
+    assert 'id="page_program_level"' in setup_page.text
+    assert 'id="page_location_label"' in setup_page.text
+    assert 'id="page_location_label"' in setup_page.text and "readonly" in setup_page.text
+    assert 'id="page_reporting_scope_code"' in setup_page.text
+    assert "Reporting Location ID (editable)" in setup_page.text
+
+    modal_page = client.get("/counter")
+    assert 'id="modal_reporting_scope_code"' in modal_page.text
+    assert 'id="modal_program_level"' in modal_page.text
+    app_js = Path("assets/js/app.js").read_text(encoding="utf-8")
+    assert "reportingScopeCodeFromPath(event.path)" in app_js
+    assert "selectedScopeCode !== eventScopeCode" in app_js
+    assert "A broader or different location scope requires a matching scheduled event." in app_js
 
 
 def test_production_session_configuration_requires_an_explicit_key(monkeypatch):
@@ -73,7 +145,7 @@ def test_service_worker_is_available_at_root_scope():
     response = client.get("/sw.js")
     assert response.status_code == 200
     assert response.headers["service-worker-allowed"] == "/"
-    assert 'const CACHE_NAME = "dclm-utility-v16"' in response.text
+    assert 'const CACHE_NAME = "dclm-utility-v33"' in response.text
 
 
 def test_application_shell_does_not_require_remote_runtime_scripts():
@@ -125,6 +197,16 @@ def test_setup_identity_schema():
     assert "DCLM" in identity.compact_badge()
     assert "DCL-234-KW-ILR-ILE-003" in identity.cache_key()
 
+    group_identity = SetupIdentity(
+        church_type="DCLM",
+        program_domain="Weekly",
+        program_type="Saturday Workers Meeting",
+        program_level="Group",
+        location_id="DCL-234-KW-ILR-ILE",
+        service_date="2026-11-07",
+    )
+    assert group_identity.location_id == "DCL-234-KW-ILR-ILE"
+
 
 def test_api_workers_requires_authenticated_backend_identity():
     """The utility must not expose a fabricated roster to unauthenticated callers."""
@@ -159,13 +241,15 @@ def test_login_uses_http_only_cookie_and_exposes_no_tokens(monkeypatch):
     assert "HttpOnly" in test_client.login_cookie_header
 
 
-def test_sync_requires_event_location_and_stable_client_id(monkeypatch):
+def test_sync_requires_program_level_for_eventless_program_record(monkeypatch):
     test_client = _authenticated_client(monkeypatch)
     response = test_client.post("/api/sync", json={
-        "counts": [{"client_id": "22222222-2222-4222-8222-222222222222", "location_id": "11111111-1111-4111-8111-111111111111"}],
+        "counts": [{"client_id": "22222222-2222-4222-8222-222222222222", "location_id": "11111111-1111-4111-8111-111111111111",
+                     "date": "2026-11-04T00:00:00Z", "church_type": "DCLM", "program_domain": "Weekly",
+                     "program_type": "Workers Meeting"}],
     })
-    assert response.status_code == 422
-    assert "event_id" in response.json()["error"]
+    assert response.status_code == 422, response.text
+    assert "program level" in response.json()["error"]
 
 
 def test_sync_forwards_valid_record_with_authenticated_session(monkeypatch):
@@ -176,11 +260,55 @@ def test_sync_forwards_valid_record_with_authenticated_session(monkeypatch):
     monkeypatch.setattr(backend_client, "push_sync_batch", push)
     response = test_client.post("/api/sync", json={
         "counts": [{"client_id": "22222222-2222-4222-8222-222222222222", "event_id": "33333333-3333-4333-8333-333333333333",
-                    "location_id": "11111111-1111-4111-8111-111111111111"}],
+                    "location_id": "11111111-1111-4111-8111-111111111111", "date": "2026-11-04T00:00:00Z",
+                    "church_type": "DCLM", "program_level": "Local", "program_type": "Sunday Worship Service"}],
     })
     assert response.status_code == 200
     assert response.json()["counts"]["details"][0]["status"] == "synced"
     push.assert_awaited_once()
+
+
+def test_worker_candidate_sync_forwards_only_candidate_fields(monkeypatch):
+    test_client = _authenticated_client(monkeypatch)
+    expected = {"ok": True, "worker_candidates": {"synced": 1, "duplicates": 0, "errors": 0,
+                "details": [{"client_id": "44444444-4444-4444-8444-444444444444", "status": "synced"}]}}
+    push = AsyncMock(return_value=expected)
+    monkeypatch.setattr(backend_client, "push_sync_batch", push)
+    response = test_client.post("/api/sync", json={"worker_candidates": [{
+        "client_id": "44444444-4444-4444-8444-444444444444", "name": "Candidate Worker",
+        "gender": "Female", "phone": "+2348012345678", "email": "candidate@example.org",
+        "unit": "Ushering", "address": "Test address",
+    }]})
+    assert response.status_code == 200, response.text
+    forwarded = push.await_args.args[0]["worker_candidates"][0]
+    assert forwarded["client_id"] == "44444444-4444-4444-8444-444444444444"
+    assert forwarded["unit"] == "Ushering"
+    assert "location_id" not in forwarded
+
+
+def test_worker_candidate_proxy_rejects_invalid_details_before_backend(monkeypatch):
+    test_client = _authenticated_client(monkeypatch)
+    push = AsyncMock()
+    monkeypatch.setattr(backend_client, "push_sync_batch", push)
+    response = test_client.post("/api/sync", json={"worker_candidates": [{
+        "client_id": "44444444-4444-4444-8444-444444444444", "name": "", "gender": "",
+        "phone": "1", "email": "bad", "unit": "",
+    }]})
+    assert response.status_code == 422
+    push.assert_not_awaited()
+
+
+def test_registration_page_includes_worker_candidate_intake(monkeypatch):
+    test_client = _authenticated_client(monkeypatch)
+    response = test_client.get("/registration")
+    assert response.status_code == 200
+    assert "Worker Candidate" in response.text
+    assert "worker-candidate-form" in response.text
+    assert "pending until reviewed by the Group Pastor" in response.text
+    assert "Submit Worker Candidate" in response.text
+    app_js = Path("assets/js/app.js").read_text(encoding="utf-8")
+    assert 'qs("#worker-candidate-form")?.closest(".dclm-card")' in app_js
+    assert 'qs("#worker-candidate-form")?.reset()' in app_js
 
 
 def test_alpha_crusade_returns_only_approved_assignments_for_signed_in_worker(monkeypatch):
@@ -231,6 +359,8 @@ def test_sync_proxy_enforces_batch_cap_before_backend_call(monkeypatch):
             "client_id": f"{index:08d}-0000-4000-8000-000000000000",
             "event_id": "33333333-3333-4333-8333-333333333333",
             "location_id": "11111111-1111-4111-8111-111111111111",
+                "date": "2026-11-04T00:00:00Z", "church_type": "DCLM", "program_level": "Local",
+                "program_type": "Sunday Worship Service",
         } for index in range(501)],
     })
     assert response.status_code == 413
@@ -244,7 +374,16 @@ def test_worker_roster_location_is_passed_as_encoded_query_param():
     import asyncio
     asyncio.run(client.get_workers("DCL-234-KW-ILR-ILE-003&limit=1", "access"))
     kwargs = client._request.await_args.kwargs
-    assert kwargs["params"] == {"location_id": "DCL-234-KW-ILR-ILE-003&limit=1", "limit": 500}
+    assert kwargs["params"] == {"location_id": "DCL-234-KW-ILR-ILE-003&limit=1", "skip": 0, "limit": 500}
+
+
+def test_sync_batch_uses_extended_timeout_for_offline_queue_batches():
+    client = BackendClient(base_url="https://backend.example")
+    client.local_url = ""
+    client._request = AsyncMock(return_value=httpx.Response(200, json={"worker_candidates": {"synced": 50}}))
+    import asyncio
+    asyncio.run(client.push_sync_batch({"worker_candidates": [{}]}, "access"))
+    assert client._request.await_args.kwargs["timeout"] == 90
 
 
 def test_fellowship_sync_requires_fellowship_id_not_program_event(monkeypatch):

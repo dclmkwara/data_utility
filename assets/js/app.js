@@ -290,7 +290,9 @@ const DCLM_APP = (function () {
       if (iconEl) {
         iconEl.className = "dclm-identity-logo me-2";
       }
-      const locationLabel = displayLocationId(activeSetup.assigned_location_id || activeSetup.location_id);
+      const locationLabel = activeSetup.reporting_scope_code
+        ? safeUiText(activeSetup.reporting_scope_code)
+        : displayLocationId(activeSetup.assigned_location_id || activeSetup.location_id);
       if (titleEl) titleEl.textContent = safeUiText(activeSetup.event_title || activeSetup.program_type || "Church program");
       if (subEl) subEl.textContent = locationLabel;
       if (btnEl) btnEl.textContent = "Change";
@@ -336,6 +338,34 @@ const DCLM_APP = (function () {
     });
   }
 
+  function reportingScopeLevel(scope) {
+    return ({ local: "Local", location: "Local", group: "Group", region: "Region", state: "State" })[String(scope || "").toLowerCase()] || "";
+  }
+
+  function reportingScopeCodeFromPath(path) {
+    const normalized = String(path || "").trim().replace(/^org\./i, "").replace(/\./g, "-");
+    if (!normalized) return "";
+    return normalized.toUpperCase().startsWith("DCL-") ? normalized.toUpperCase() : `DCL-${normalized.toUpperCase()}`;
+  }
+
+  function syncReportingScopeFromEvent(prefix) {
+    const eventSelect = qs(`#${prefix}_event_id`);
+    const levelSelect = qs(`#${prefix}_program_level`);
+    const scopeInput = qs(`#${prefix}_reporting_scope_code`);
+    if (!eventSelect || !levelSelect || !scopeInput) return;
+    const option = eventSelect.selectedOptions?.[0];
+    if (eventSelect.value && option?.dataset.reportingScopeCode) {
+      const eventLevel = reportingScopeLevel(option.dataset.reportingScope);
+      if (eventLevel && Array.from(levelSelect.options).some((item) => item.value === eventLevel)) {
+        levelSelect.value = eventLevel;
+      }
+      scopeInput.value = option.dataset.reportingScopeCode;
+      return;
+    }
+    levelSelect.value = "Local";
+    scopeInput.value = assignedLocation?.formatted_id || "";
+  }
+
   async function loadAssignedLocation() {
     const apply = (location) => {
       assignedLocation = location || null;
@@ -343,9 +373,11 @@ const DCLM_APP = (function () {
         const id = qs(`#${prefix}_location_id`);
         const label = qs(`#${prefix}_location_label`);
         const level = qs(`#${prefix}_program_level`);
+        const scopeCode = qs(`#${prefix}_reporting_scope_code`);
         if (id) id.value = location?.location_id || "";
         if (label) label.value = location ? `${location.location_name} · ${location.formatted_id}` : "Location unavailable";
         if (level) level.value = "Local";
+        if (scopeCode && !activeSetup?.event_id) scopeCode.value = location?.formatted_id || "";
         const church = qs(`#${prefix}_church_type`);
         if (church && location?.church_type && Array.from(church.options).some((option) => option.value === location.church_type)) {
           church.value = location.church_type;
@@ -365,17 +397,88 @@ const DCLM_APP = (function () {
       const data = await response.json();
       if (!response.ok || !data.ok) throw new Error(data.error || "Could not load your assigned location.");
       apply(data.location);
+      try {
+        await applyActiveAssignedEvent(data.location);
+      } catch (assignmentError) {
+        showToast(assignmentError.message || "Assigned program setup could not be refreshed.", "warning");
+      }
       await refreshActiveSetup();
       if (activeScreen === "attendance") {
         updateAttendanceSetupGate();
         if (window.location.pathname.endsWith("/review")) renderAttendanceReview();
       }
       const settingsLocation = qs("#settings-user-location");
-      if (settingsLocation) settingsLocation.textContent = displayLocationId(location.location_id);
+      if (settingsLocation) settingsLocation.textContent = displayLocationId(data.location.location_id);
     } catch (error) {
       apply(null);
       showToast(error.message || "Could not load your assigned location.", "warning");
     }
+  }
+
+  async function applyActiveAssignedEvent(location) {
+    if (!navigator.onLine || !location?.location_id) return;
+    const response = await window.DCLM_AUTH.apiFetch("/api/events/assigned-to-me");
+    const data = await response.json();
+    if (!response.ok || !data.ok) throw new Error(data.error || "Could not load your assigned program setup.");
+    const assignments = data.items || [];
+    if (assignments.length !== 1) {
+      if (activeSetup?.assignment_autoset) {
+        await DCLM_DB.clearActiveSetup();
+        activeSetup = null;
+      }
+      if (assignments.length > 1) {
+        showToast("You have more than one active program assignment. Choose the correct program in Setup.", "warning");
+      }
+      return;
+    }
+    const assigned = assignments[0];
+    const event = assigned.event || {};
+    const type = event.program_type || {};
+    const domain = type.domain || {};
+    const domainNames = {
+      "Weekly Programs": "Weekly", "Global Crusade": "Crusade",
+      "Conferences": "Conference", "Special Programs": "Special",
+    };
+    const levelNames = { location: "Local", group: "Group", region: "Region", state: "State" };
+    const included = new Set(
+      assigned.assignment_type === "all"
+        ? ["count", "convert", "attendance"]
+        : assigned.assignment_type === "both"
+          ? ["count", "convert"] : [assigned.assignment_type],
+    );
+    const reportingLocationId = assigned.source_role === "alpha"
+      ? String(event.alpha_location_id || "")
+      : String(location.location_id);
+    if (!reportingLocationId) {
+      throw new Error("The assigned Alpha Location is missing. Ask the event administrator to correct the schedule.");
+    }
+    const combined = ["group", "region", "state"].includes(String(event.reporting_scope || "").toLowerCase());
+    const identity = {
+      church_type: location.church_type || "DCLM",
+      program_domain: domainNames[domain.name] || domain.name || "",
+      program_type: type.name || "",
+      program_level: levelNames[String(event.reporting_scope || "").toLowerCase()] || "",
+      location_id: reportingLocationId,
+      assigned_location_id: reportingLocationId,
+      location_name: location.location_name || "Assigned location",
+      location_label: location.formatted_id || "",
+      reporting_scope_code: reportingScopeCodeFromPath(event.path),
+      service_date: event.date || "",
+      event_id: event.id || "",
+      event_title: event.title || type.name || "Assigned program",
+      assignment_autoset: true,
+      requires_count_assignment: included.has("count"),
+      count_assignment_id: included.has("count") ? assigned.assignment_id : null,
+      requires_convert_assignment: included.has("convert"),
+      convert_assignment_id: included.has("convert") ? assigned.assignment_id : null,
+      requires_attendance: combined && included.has("attendance"),
+      attendance_assignment_id: combined && included.has("attendance") ? assigned.assignment_id : null,
+    };
+    if (!identity.program_domain || !identity.program_type || !identity.program_level || !identity.service_date || !identity.event_id) {
+      throw new Error("Your active event assignment has incomplete program metadata. Ask the event administrator to correct it.");
+    }
+    await DCLM_DB.saveActiveSetup(identity);
+    activeSetup = identity;
   }
 
   async function loadProgramEvents(prefix) {
@@ -411,14 +514,19 @@ const DCLM_APP = (function () {
       const previous = select.value || (activeSetup?.location_id === locationId && activeSetup?.service_date === serviceDate ? activeSetup.event_id : "");
       const options = [new Option(data.items.length ? "No scheduled event selected" : "No matching event (routine services may continue without one)", "")];
       for (const event of data.items) {
-        const option = new Option([event.title || event.program_type?.name || programType, event.date, event.event_mode].filter(Boolean).join(" · "), event.id);
+        const eventLevel = reportingScopeLevel(event.reporting_scope);
+        const eventScopeCode = reportingScopeCodeFromPath(event.path);
+        const option = new Option([event.title || event.program_type?.name || programType, event.date, eventLevel, eventScopeCode].filter(Boolean).join(" · "), event.id);
         option.dataset.locationId = event.location_id || locationId;
         option.dataset.title = event.title || event.program_type?.name || programType;
+        option.dataset.reportingScope = event.reporting_scope || "";
+        option.dataset.reportingScopeCode = eventScopeCode;
         options.push(option);
       }
       select.replaceChildren(...options);
       if (previous && data.items.some((event) => String(event.id) === String(previous))) select.value = previous;
       select.disabled = false;
+      syncReportingScopeFromEvent(prefix);
     } catch (error) {
       select.replaceChildren(new Option("Events unavailable; reconnect to load", ""));
       select.disabled = true;
@@ -428,7 +536,7 @@ const DCLM_APP = (function () {
 
   async function resolveEventAssignments(eventId, locationId) {
     if (!eventId || !locationId) {
-      return { requires_count_assignment: false, count_assignment_id: null, requires_convert_assignment: false, convert_assignment_id: null };
+      return { requires_count_assignment: false, count_assignment_id: null, requires_convert_assignment: false, convert_assignment_id: null, requires_attendance: false, attendance_assignment_id: null };
     }
     if (!navigator.onLine && activeSetup?.event_id === eventId && activeSetup?.location_id === locationId) {
       return {
@@ -438,6 +546,8 @@ const DCLM_APP = (function () {
         requires_convert_assignment: Boolean(activeSetup.requires_convert_assignment),
         convert_assignment_id: activeSetup.convert_assignment_id || null,
         convert_assignment_ambiguous: Boolean(activeSetup.convert_assignment_ambiguous),
+        requires_attendance: Boolean(activeSetup.requires_attendance),
+        attendance_assignment_id: activeSetup.attendance_assignment_id || null,
       };
     }
     const response = await window.DCLM_AUTH.apiFetch(
@@ -447,6 +557,7 @@ const DCLM_APP = (function () {
     if (!response.ok || !data.ok) throw new Error(data.error || "Could not verify the count assignment.");
     const countAssignments = data.count_assignments || [];
     const convertAssignments = data.convert_assignments || [];
+    const attendanceAssignments = data.attendance_assignments || [];
     return {
       requires_count_assignment: Boolean(data.required),
       count_assignment_id: countAssignments.length === 1 ? countAssignments[0].assignment_id : null,
@@ -454,6 +565,9 @@ const DCLM_APP = (function () {
       requires_convert_assignment: Boolean(data.required),
       convert_assignment_id: convertAssignments.length === 1 ? convertAssignments[0].assignment_id : null,
       convert_assignment_ambiguous: convertAssignments.length > 1,
+      requires_attendance: Boolean(data.requires_attendance),
+      attendance_assignment_id: attendanceAssignments.length === 1 ? attendanceAssignments[0].assignment_id : null,
+      attendance_assignment_ambiguous: attendanceAssignments.length > 1,
     };
   }
 
@@ -469,6 +583,30 @@ const DCLM_APP = (function () {
     let countAssignment;
     const eventOption = ["modal_event_id", "page_event_id"].map((id) => qs(`#${id}`)).find((el) => el?.value === selectedEventId)?.selectedOptions?.[0];
     const eventLocationId = eventOption?.dataset.locationId || normalizedLocation;
+    const scopeToProgramLevel = {
+      local: "Local", location: "Local", group: "Group", region: "Region",
+      state: "State", national: "National", global: "Global",
+    };
+    const eventProgramLevel = scopeToProgramLevel[String(eventOption?.dataset.reportingScope || "").toLowerCase()];
+    const selectedProgramLevel = formData.program_level || "Local";
+    const selectedScopeCode = String(formData.reporting_scope_code || "").trim().toUpperCase();
+    const eventScopeCode = String(eventOption?.dataset.reportingScopeCode || "").trim().toUpperCase();
+    if (selectedEventId) {
+      if (!eventProgramLevel || !eventScopeCode) {
+        showToast("This scheduled event has no supported reporting level or hierarchy ID. Ask an administrator to correct the event scope.", "warning");
+        return false;
+      }
+      if (selectedProgramLevel !== eventProgramLevel || selectedScopeCode !== eventScopeCode) {
+        showToast(`Reporting level and ID must match the selected event (${eventProgramLevel} · ${eventScopeCode}).`, "warning");
+        return false;
+      }
+    } else {
+      const assignedCode = String(assignedLocation?.formatted_id || "").trim().toUpperCase();
+      if (selectedProgramLevel !== "Local" || !assignedCode || selectedScopeCode !== assignedCode) {
+        showToast("A broader or different location scope requires a matching scheduled event. Routine submissions use your assigned location.", "warning");
+        return false;
+      }
+    }
     try {
       countAssignment = await resolveEventAssignments(
         selectedEventId,
@@ -482,10 +620,11 @@ const DCLM_APP = (function () {
       program_domain: formData.program_domain,
       program_type: formData.program_type,
       event_title: selectedEventId ? (eventOption?.dataset.title || formData.program_type) : formData.program_type,
-      program_level: formData.program_level,
+      program_level: eventProgramLevel || selectedProgramLevel,
+      reporting_scope_code: eventScopeCode || selectedScopeCode,
       location_id: eventLocationId,
       assigned_location_id: assignedLocation?.location_id || normalizedLocation,
-      location_label: assignedLocation?.formatted_id || assignedLocation?.location_name || "Assigned location",
+      location_label: selectedScopeCode || assignedLocation?.formatted_id || assignedLocation?.location_name || "Assigned location",
       location_name: assignedLocation?.location_name || "",
       church_type: formData.church_type || assignedLocation?.church_type || "DCLM",
       service_date: formData.service_date || todayISO(),
@@ -496,11 +635,14 @@ const DCLM_APP = (function () {
       requires_convert_assignment: countAssignment.requires_convert_assignment,
       convert_assignment_id: countAssignment.convert_assignment_id,
       convert_assignment_ambiguous: countAssignment.convert_assignment_ambiguous || false,
+      requires_attendance: countAssignment.requires_attendance,
+      attendance_assignment_id: countAssignment.attendance_assignment_id,
+      attendance_assignment_ambiguous: countAssignment.attendance_assignment_ambiguous || false,
     };
 
     const draft = await DCLM_DB.getCountDraft();
     const draftContextChanged = draft && [
-      "event_id", "location_id", "program_type", "program_domain", "program_level", "church_type", "service_date",
+      "event_id", "location_id", "program_type", "program_domain", "program_level", "reporting_scope_code", "church_type", "service_date",
     ].some((field) => draft[field] !== identity[field]);
     if (draft && draftContextChanged && Object.values(draft.counts || {}).some((value) => Number(value) > 0)) {
       showToast("Finish or reset the current population tally before changing its event or location.", "warning");
@@ -528,8 +670,8 @@ const DCLM_APP = (function () {
     return true;
   }
 
-  function initSetupBindings() {
-    loadAssignedLocation();
+  async function initSetupBindings() {
+    await loadAssignedLocation();
     bindDomainTypeSync("modal_program_domain", "modal_program_type");
     bindDomainTypeSync("page_program_domain", "page_program_type");
 
@@ -542,6 +684,7 @@ const DCLM_APP = (function () {
           program_domain: qs("#modal_program_domain")?.value,
           program_type: qs("#modal_program_type")?.value,
           program_level: qs("#modal_program_level")?.value,
+          reporting_scope_code: qs("#modal_reporting_scope_code")?.value,
           location_id: qs("#modal_location_id")?.value,
           service_date: qs("#modal_service_date")?.value,
           event_id: qs("#modal_event_id")?.value,
@@ -566,6 +709,7 @@ const DCLM_APP = (function () {
           program_domain: qs("#page_program_domain")?.value,
           program_type: qs("#page_program_type")?.value,
           program_level: qs("#page_program_level")?.value,
+          reporting_scope_code: qs("#page_reporting_scope_code")?.value,
           location_id: qs("#page_location_id")?.value,
           service_date: qs("#page_service_date")?.value,
           event_id: qs("#page_event_id")?.value,
@@ -586,8 +730,9 @@ const DCLM_APP = (function () {
       }
       if (qs("#modal_program_type")) qs("#modal_program_type").value = activeSetup.program_type || "";
       if (qs("#modal_program_level")) qs("#modal_program_level").value = activeSetup.program_level || "";
+      if (qs("#modal_reporting_scope_code")) qs("#modal_reporting_scope_code").value = activeSetup.reporting_scope_code || activeSetup.location_label || assignedLocation?.formatted_id || "";
       if (qs("#modal_location_id")) qs("#modal_location_id").value = activeSetup.assigned_location_id || activeSetup.location_id || "";
-      if (qs("#modal_location_label")) qs("#modal_location_label").value = activeSetup.location_label || assignedLocation?.formatted_id || "";
+      if (qs("#modal_location_label")) qs("#modal_location_label").value = assignedLocation ? `${assignedLocation.location_name} · ${assignedLocation.formatted_id}` : "";
       if (qs("#modal_service_date")) qs("#modal_service_date").value = activeSetup.service_date || todayISO();
       if (qs("#modal_event_id")) qs("#modal_event_id").value = activeSetup.event_id || "";
 
@@ -599,18 +744,22 @@ const DCLM_APP = (function () {
       }
       if (qs("#page_program_type")) qs("#page_program_type").value = activeSetup.program_type || "";
       if (qs("#page_program_level")) qs("#page_program_level").value = activeSetup.program_level || "";
+      if (qs("#page_reporting_scope_code")) qs("#page_reporting_scope_code").value = activeSetup.reporting_scope_code || activeSetup.location_label || assignedLocation?.formatted_id || "";
       if (qs("#page_location_id")) qs("#page_location_id").value = activeSetup.assigned_location_id || activeSetup.location_id || "";
-      if (qs("#page_location_label")) qs("#page_location_label").value = activeSetup.location_label || assignedLocation?.formatted_id || "";
+      if (qs("#page_location_label")) qs("#page_location_label").value = assignedLocation ? `${assignedLocation.location_name} · ${assignedLocation.formatted_id}` : "";
       if (qs("#page_service_date")) qs("#page_service_date").value = activeSetup.service_date || todayISO();
       if (qs("#page_event_id")) qs("#page_event_id").value = activeSetup.event_id || "";
     } else {
       if (qs("#modal_service_date")) qs("#modal_service_date").value = todayISO();
       if (qs("#page_service_date")) qs("#page_service_date").value = todayISO();
+      if (qs("#modal_reporting_scope_code")) qs("#modal_reporting_scope_code").value = assignedLocation?.formatted_id || "";
+      if (qs("#page_reporting_scope_code")) qs("#page_reporting_scope_code").value = assignedLocation?.formatted_id || "";
     }
     for (const prefix of ["modal", "page"]) {
       for (const field of ["location_id", "service_date", "program_type"]) {
         qs(`#${prefix}_${field}`)?.addEventListener("change", () => loadProgramEvents(prefix));
       }
+      qs(`#${prefix}_event_id`)?.addEventListener("change", () => syncReportingScopeFromEvent(prefix));
     }
     if (activeSetup?.location_id) {
       loadProgramEvents("modal");
@@ -763,6 +912,7 @@ const DCLM_APP = (function () {
           payment_method: paymentMethod,
           recorded_at: new Date().toISOString(),
           church_type: activeSetup.church_type,
+          program_level: activeSetup.program_level,
           program_domain: activeSetup.program_domain,
           program_type: activeSetup.program_type,
           service_date: activeSetup.service_date,
@@ -818,6 +968,7 @@ const DCLM_APP = (function () {
           total: total,
           captured_at: new Date().toISOString(),
           church_type: activeSetup.church_type,
+          program_level: activeSetup.program_level,
           program_domain: activeSetup.program_domain,
           program_type: activeSetup.program_type,
           service_date: activeSetup.service_date,
@@ -864,6 +1015,21 @@ const DCLM_APP = (function () {
 
     try {
       showToast(cached.length ? "Refreshing the saved roster; it may be out of date." : "Fetching location worker roster...", "info");
+      if (activeSetup?.event_id && activeSetup?.requires_attendance) {
+        if (!activeSetup.attendance_assignment_id) throw new Error("This combined meeting requires your approved attendance assignment.");
+        const response = await window.DCLM_AUTH.apiFetch(`/api/events/${encodeURIComponent(activeSetup.event_id)}/attendance-roster`);
+        const data = await response.json();
+        if (!response.ok || !data.ok || !Array.isArray(data.items)) throw new Error(data.error || "Could not load the assigned combined-meeting roster.");
+        cachedRoster = data.items.map((worker) => ({ ...worker, marked_present: false,
+          attendance_submitted: submittedWorkers.has(String(worker.worker_id)),
+          attendance_queued: pendingWorkers.has(String(worker.worker_id)) && !submittedWorkers.has(String(worker.worker_id)),
+        }));
+        await DCLM_DB.saveWorkerRoster(cachedRoster, locationId);
+        rosterState = cachedRoster.length ? "fresh" : "empty";
+        showToast(`Combined roster refreshed: ${cachedRoster.length} approved workers.`, cachedRoster.length ? "success" : "info");
+        renderWorkerRoster();
+        return;
+      }
       const rosterItems = [];
       for (let skip = 0; skip <= 5000; skip += 500) {
         const resp = await window.DCLM_AUTH.apiFetch(`/api/workers?location_id=${encodeURIComponent(locationId)}&skip=${skip}&limit=500`);
@@ -986,7 +1152,7 @@ const DCLM_APP = (function () {
     if (presentCountEl) presentCountEl.textContent = marked.length.toLocaleString();
     if (rosterCountEl) rosterCountEl.textContent = roster.length.toLocaleString();
     const locationName = assignedLocation?.location_name || activeSetup.location_name || "Assigned location";
-    const locationCode = displayLocationId(activeSetup.assigned_location_id || activeSetup.location_id);
+    const locationCode = safeUiText(activeSetup.reporting_scope_code || displayLocationId(activeSetup.assigned_location_id || activeSetup.location_id));
     const programEl = qs("#review-setup-program");
     const locationEl = qs("#review-setup-location");
     const locationIdEl = qs("#review-setup-location-id");
@@ -1056,8 +1222,10 @@ const DCLM_APP = (function () {
       client_id: generateUUID(),
       location_id: activeSetup.location_id,
       event_id: activeSetup.event_id || null,
+      assignment_id: activeSetup.attendance_assignment_id || null,
       context_key: contextKey,
       church_type: activeSetup.church_type,
+      program_level: activeSetup.program_level,
       program_domain: activeSetup.program_domain,
       program_type: activeSetup.program_type,
       service_date: activeSetup.service_date,
@@ -1147,21 +1315,29 @@ const DCLM_APP = (function () {
   function initRegistrationBindings() {
     const convertBtn = qs("#toggle-btn-convert");
     const newcomerBtn = qs("#toggle-btn-newcomer");
+    const workerCandidateBtn = qs("#toggle-btn-worker-candidate");
     const recordTypeInput = qs("#reg_record_type");
+    const registrationFormCard = qs("#registration-entry-form")?.closest(".dclm-card");
+    const workerCandidateCard = qs("#worker-candidate-form")?.closest(".dclm-card");
+
+    const setRegistrationMode = (mode) => {
+      const isWorkerCandidate = mode === "worker_candidate";
+      if (registrationFormCard) registrationFormCard.style.display = isWorkerCandidate ? "none" : "";
+      if (workerCandidateCard) workerCandidateCard.style.display = isWorkerCandidate ? "" : "none";
+      convertBtn?.classList.toggle("btn-primary", mode === "convert");
+      convertBtn?.classList.toggle("btn-outline-secondary", mode !== "convert");
+      newcomerBtn?.classList.toggle("btn-primary", mode === "newcomer");
+      newcomerBtn?.classList.toggle("btn-outline-secondary", mode !== "newcomer");
+      workerCandidateBtn?.classList.toggle("btn-primary", isWorkerCandidate);
+      workerCandidateBtn?.classList.toggle("btn-outline-secondary", !isWorkerCandidate);
+      if (recordTypeInput && mode !== "worker_candidate") recordTypeInput.value = mode;
+    };
 
     if (convertBtn && newcomerBtn) {
-      convertBtn.addEventListener("click", () => {
-        convertBtn.className = "btn btn-primary w-100 rounded-pill py-2 fw-semibold";
-        newcomerBtn.className = "btn btn-outline-secondary w-100 rounded-pill py-2 fw-semibold";
-        if (recordTypeInput) recordTypeInput.value = "convert";
-      });
-
-      newcomerBtn.addEventListener("click", () => {
-        newcomerBtn.className = "btn btn-primary w-100 rounded-pill py-2 fw-semibold";
-        convertBtn.className = "btn btn-outline-secondary w-100 rounded-pill py-2 fw-semibold";
-        if (recordTypeInput) recordTypeInput.value = "newcomer";
-      });
+      convertBtn.addEventListener("click", () => setRegistrationMode("convert"));
+      newcomerBtn.addEventListener("click", () => setRegistrationMode("newcomer"));
     }
+    workerCandidateBtn?.addEventListener("click", () => setRegistrationMode("worker_candidate"));
 
     const regSubmitBtn = qs("#btn-submit-registration");
     if (regSubmitBtn) {
@@ -1229,6 +1405,7 @@ const DCLM_APP = (function () {
             salvation_type: qs("#reg_salvation_type")?.value || "",
           },
           church_type: activeSetup.church_type,
+          program_level: activeSetup.program_level,
           program_domain: activeSetup.program_domain,
           program_type: activeSetup.program_type,
           service_date: activeSetup.service_date,
@@ -1250,6 +1427,42 @@ const DCLM_APP = (function () {
         } catch (error) { showToast(`Could not save this registration: ${safeUiText(error.message)}`, "danger"); }
       });
     }
+
+    const workerCandidateSubmit = qs("#btn-submit-worker-candidate");
+    workerCandidateSubmit?.addEventListener("click", async () => {
+      const name = qs("#candidate_name")?.value.trim() || "";
+      const gender = qs("#candidate_gender")?.value || "";
+      const phone = (qs("#candidate_phone")?.value.trim() || "").replace(/[\s()-]/g, "");
+      const email = qs("#candidate_email")?.value.trim() || "";
+      const unit = qs("#candidate_unit")?.value.trim() || "";
+      if (!name || !gender || !phone || !email || !unit) {
+        showToast("Name, gender, phone, email, and worker unit are required.", "warning");
+        return;
+      }
+      if (!/^\+?\d{7,15}$/.test(phone) || name.length > 255 || unit.length > 120) {
+        showToast("Check the candidate name, phone number, and worker unit.", "warning");
+        return;
+      }
+      const candidate = {
+        client_id: generateUUID(), name, gender, phone, email, unit,
+        address: qs("#candidate_address")?.value.trim() || null,
+        occupation: qs("#candidate_occupation")?.value.trim() || null,
+        marital_status: qs("#candidate_marital_status")?.value || null,
+      };
+      try {
+        if (!activeSetup?.location_id || !activeSetup?.service_date || !activeSetup?.program_type) {
+          showToast("Complete program setup before registering a worker candidate.", "warning");
+          return;
+        }
+        const result = await runButtonAction(workerCandidateSubmit, "Saving...", () =>
+          DCLM_SYNC.submitOrQueue("worker_candidates_queue", candidate));
+        if (!result || (!result.submitted && !result.queued)) return;
+        qs("#worker-candidate-form")?.reset();
+        haptic("success");
+      } catch (error) {
+        showToast(`Could not save worker candidate: ${safeUiText(error.message)}`, "danger");
+      }
+    });
   }
 
   function initFellowshipBindings() {
@@ -1369,11 +1582,12 @@ const DCLM_APP = (function () {
     const offerings = await DCLM_DB.getAllFromQueue("offerings_queue");
     const attendance = await DCLM_DB.getAllFromQueue("attendance_queue");
     const registrations = await DCLM_DB.getAllFromQueue("registration_queue");
+    const workerCandidates = await DCLM_DB.getAllFromQueue("worker_candidates_queue");
     const fellowshipMembers = await DCLM_DB.getAllFromQueue("fellowship_members_queue");
     const fellowshipAttendance = await DCLM_DB.getAllFromQueue("fellowship_attendance_queue");
     const fellowshipOfferings = await DCLM_DB.getAllFromQueue("fellowship_offerings_queue");
 
-    const totalBatches = counts.length + offerings.length + attendance.length + registrations.length
+    const totalBatches = counts.length + offerings.length + attendance.length + registrations.length + workerCandidates.length
       + fellowshipMembers.length + fellowshipAttendance.length + fellowshipOfferings.length;
     if (badgeEl) badgeEl.textContent = `${totalBatches} Pending`;
 
@@ -1436,7 +1650,20 @@ const DCLM_APP = (function () {
               <div class="small text-muted">${escapeHTML(item.phone)} • ${escapeHTML(item.details?.salvation_type || "Follow-up")}</div>
               ${item.last_error ? `<div class="small text-danger mt-1">Sync issue: ${escapeHTML(item.last_error)}</div>` : ""}
             </div>
-            <div class="d-flex gap-2"><button type="button" class="btn btn-sm btn-primary rounded-pill px-3" data-sync-store="registration_queue" data-sync-id="${escapeHTML(item.client_id)}">Sync</button><button type="button" class="btn btn-sm btn-outline-danger rounded-pill px-3" data-discard-store="registration_queue" data-discard-id="${escapeHTML(item.client_id)}">Discard</button></div>
+          <div class="d-flex gap-2"><button type="button" class="btn btn-sm btn-primary rounded-pill px-3" data-sync-store="registration_queue" data-sync-id="${escapeHTML(item.client_id)}">Sync</button><button type="button" class="btn btn-sm btn-outline-danger rounded-pill px-3" data-discard-store="registration_queue" data-discard-id="${escapeHTML(item.client_id)}">Discard</button></div>
+          </div>
+        `;
+      });
+
+      workerCandidates.forEach((item) => {
+        html += `
+          <div class="dclm-queue-item type-register">
+            <div>
+              <div class="fw-bold text-dark small"><i class="bi bi-person-vcard-fill text-primary me-1"></i> Worker Candidate: ${escapeHTML(item.name)}</div>
+              <div class="small text-muted">${escapeHTML(item.phone)} · ${escapeHTML(item.unit)}</div>
+              ${item.last_error ? `<div class="small text-danger mt-1">Sync issue: ${escapeHTML(item.last_error)}</div>` : ""}
+            </div>
+            <div class="d-flex gap-2"><button type="button" class="btn btn-sm btn-primary rounded-pill px-3" data-sync-store="worker_candidates_queue" data-sync-id="${escapeHTML(item.client_id)}">Sync</button><button type="button" class="btn btn-sm btn-outline-danger rounded-pill px-3" data-discard-store="worker_candidates_queue" data-discard-id="${escapeHTML(item.client_id)}">Discard</button></div>
           </div>
         `;
       });
@@ -1637,7 +1864,7 @@ const DCLM_APP = (function () {
       clearAllBtn.addEventListener("click", async () => {
         if (await confirm("Delete this account's setup, cached roster, recent history, and all pending records from this device? Pending records cannot be recovered after deletion.", { title: "Clear saved device data", confirmLabel: "Delete all", danger: true })) {
           const stores = ["active_setup", "worker_roster", "app_settings", "counts_queue", "offerings_queue",
-                          "attendance_queue", "registration_queue", "fellowship_members_queue", "fellowship_attendance_queue",
+                          "attendance_queue", "registration_queue", "worker_candidates_queue", "fellowship_members_queue", "fellowship_attendance_queue",
                           "fellowship_offerings_queue", "recent_submissions", "count_draft",
                           "attendance_confirmed"];
           for (const store of stores) {
@@ -1673,7 +1900,7 @@ const DCLM_APP = (function () {
 
     window.__DCLM_HAPTICS_ENABLED__ = await DCLM_DB.getHapticsEnabled();
     await refreshActiveSetup();
-    initSetupBindings();
+    await initSetupBindings();
 
     if (activeScreen === "counter") {
       await initCounterBindings();

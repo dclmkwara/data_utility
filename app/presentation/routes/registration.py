@@ -23,7 +23,7 @@ def setup_registration_routes(app: Any) -> None:
                         id="toggle-btn-convert",
                         cls="btn btn-primary w-100 rounded-pill py-2 fw-semibold",
                     ),
-                    cols=6
+                    cols=4
                 ),
                 Col(
                     Button(
@@ -32,10 +32,55 @@ def setup_registration_routes(app: Any) -> None:
                         id="toggle-btn-newcomer",
                         cls="btn btn-outline-secondary w-100 rounded-pill py-2 fw-semibold",
                     ),
-                    cols=6
+                    cols=4
+                ),
+                Col(
+                    Button(
+                        I(cls="bi bi-person-vcard me-1"), "Worker Candidate",
+                        type="button",
+                        id="toggle-btn-worker-candidate",
+                        cls="btn btn-outline-secondary w-100 rounded-pill py-2 fw-semibold",
+                    ),
+                    cols=4
                 ),
                 cls="g-2 mb-3"
             )
+        )
+
+        worker_candidate_form = Card(
+            Form(
+                Div(
+                    Label("Full Name *", for_="candidate_name", cls="form-label small fw-bold text-muted mb-1"),
+                    Input(id="candidate_name", type="text", maxlength="255", required=True, cls="form-control rounded-3 mb-3"),
+                    Label("Gender *", for_="candidate_gender", cls="form-label small fw-bold text-muted mb-1"),
+                    Select(Option("Select...", value=""), Option("Male", value="Male"), Option("Female", value="Female"), id="candidate_gender", required=True, cls="form-select rounded-3 mb-3"),
+                    Label("Phone Number *", for_="candidate_phone", cls="form-label small fw-bold text-muted mb-1"),
+                    Input(id="candidate_phone", type="tel", maxlength="30", required=True, cls="form-control rounded-3 mb-3"),
+                    Label("Email Address *", for_="candidate_email", cls="form-label small fw-bold text-muted mb-1"),
+                    Input(id="candidate_email", type="email", maxlength="254", required=True, cls="form-control rounded-3 mb-3"),
+                    Label("Worker Unit *", for_="candidate_unit", cls="form-label small fw-bold text-muted mb-1"),
+                    Input(id="candidate_unit", type="text", maxlength="120", placeholder="e.g. Ushering, Choir", required=True, cls="form-control rounded-3 mb-3"),
+                    Details(
+                        Summary("Additional details", cls="fw-semibold text-primary py-2"),
+                        Label("Residential Address", for_="candidate_address", cls="form-label small fw-bold text-muted mb-1"),
+                        Textarea("", id="candidate_address", rows=2, maxlength="500", cls="form-control rounded-3 mb-3"),
+                        Label("Occupation", for_="candidate_occupation", cls="form-label small fw-bold text-muted mb-1"),
+                        Input(id="candidate_occupation", type="text", maxlength="200", cls="form-control rounded-3 mb-3"),
+                        Label("Marital Status", for_="candidate_marital_status", cls="form-label small fw-bold text-muted mb-1"),
+                        Select(Option("Select...", value=""), *[Option(label, value=key) for key, label in MARITAL_STATUSES], id="candidate_marital_status", cls="form-select rounded-3 mb-3"),
+                    ),
+                    P("This submits a worker candidate to your assigned location. The candidate remains pending until reviewed by the Group Pastor.", cls="small text-muted"),
+                    Row(
+                        Col(Button("Clear Form", type="reset", cls="btn btn-outline-secondary w-100 rounded-pill py-2"), cols=4),
+                        Col(Button("Submit Worker Candidate", type="button", id="btn-submit-worker-candidate", cls="btn btn-primary w-100 rounded-pill py-2 fw-semibold"), cols=8),
+                        cls="g-2 pt-2 border-top",
+                    ),
+                    id="worker-candidate-entry-form",
+                ),
+                id="worker-candidate-form",
+            ),
+            cls="dclm-card mb-4",
+            style="display:none",
         )
 
         form_card = Card(
@@ -169,12 +214,13 @@ def setup_registration_routes(app: Any) -> None:
         return app_shell(
             active_screen="registration",
             page_title="Field Registration",
-            subtitle="Capture converts and first-time guests for church integration and pastoral follow-up.",
+            subtitle="Capture converts, guests, and worker candidates for church follow-up and approval.",
             content=Div(
                 setup_required_shield("Field Registration"),
                 Div(
                     decision_toggle,
                     form_card,
+                    worker_candidate_form,
                     id="registration-content-wrap"
                 ),
             ),

@@ -12,11 +12,11 @@ CHURCH_TYPES: list[tuple[str, str]] = [
 
 # 2. Program Domains
 PROGRAM_DOMAINS: list[tuple[str, str]] = [
-    ("Weekly", "Weekly Routine Services"),
-    ("Crusade", "Global / City Outreach Crusades"),
-    ("Retreat", "Workers / Church Retreats"),
-    ("Conference", "Leadership / Specialized Conferences"),
-    ("Special", "Special Events & Thanksgiving"),
+    ("Weekly", "Weekly Programs"),
+    ("Crusade", "Global Crusade"),
+    ("Retreat", "Retreat"),
+    ("Conference", "Conferences"),
+    ("Special", "Special Programs"),
 ]
 
 # 3. Domain to Program Types Mapping
@@ -24,48 +24,42 @@ PROGRAM_TYPES_BY_DOMAIN: dict[str, list[str]] = {
     "Weekly": [
         "Sunday Worship Service",
         "Monday Bible Study",
-        "Thursday Revival & Training",
-        "Workers Meeting",
-        "Leaders Meeting",
-        "Home Caring Fellowship",
-        "Personal Evangelism",
+        "Tuesday Leaders Meeting",
+        "Thursday Revival Hour",
+        "Saturday Workers Meeting",
     ],
     "Crusade": [
-        "Global Crusade with Kumuyi (GCK)",
-        "City-Wide Impact Crusade",
-        "Campus Explosion Crusade",
-        "Youth Revival Rally",
+        "Crusade Evening",
+        "Leadership Development Meeting",
+        "Impact Academy",
+        "Global Sunday Service",
     ],
     "Retreat": [
-        "National Workers Retreat",
-        "Easter Retreat",
-        "December Retreat",
-        "Leadership Spiritual Retreat",
+        "Faith Clinic",
+        "Retreat Bible Study",
+        "Revival Session",
+        "Seminar",
     ],
     "Conference": [
-        "Leadership Development Conference",
-        "State Overseers Conference",
-        "Professionals Conference",
-        "Youth Empowerment Summit",
+        "Workers Conference",
+        "Ministers and Leaders Strategic Conference",
+        "Youth and Campus Conference",
     ],
     "Special": [
-        "Annual Thanksgiving Service",
-        "Covenant Sunday Service",
+        "Special Rally",
         "Solemn Assembly",
-        "Special Musical Concert",
-        "Marriage Dedication",
-        "Water Baptism Service",
+        "Anniversary Celebration",
     ],
 }
 
 # 4. Ecclesiastical Hierarchy Levels
 PROGRAM_LEVELS: list[tuple[str, str]] = [
-    ("Local", "Local Church (Location Level 6)"),
-    ("Group", "Group Headquarters (Level 5)"),
-    ("Region", "Region Headquarters (Level 4)"),
-    ("State", "State Headquarters (Level 3)"),
-    ("National", "National Office (Level 2)"),
-    ("Global", "Global Headquarters (Level 1)"),
+    ("Local", "Location scope (pastoral level 2)"),
+    ("Group", "Group scope (pastoral level 3)"),
+    ("Region", "Region scope (pastoral level 4)"),
+    ("State", "State scope (pastoral level 5)"),
+    ("National", "National scope (higher-tier client)"),
+    ("Global", "Global scope (higher-tier client)"),
 ]
 
 FELLOWSHIP_GROUPS: list[tuple[str, str]] = [

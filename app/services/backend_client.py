@@ -180,6 +180,42 @@ class BackendClient:
             raise BackendAPIError(502, "Church_server returned invalid event assignments")
         return data
 
+    async def get_event_attendance_roster(self, event_id: str, access_token: str) -> list[dict[str, Any]]:
+        """Return the broader roster only when the server confirms an attendance assignment."""
+        resp = await self._request(
+            "GET", f"/api/v1/programs/events/{event_id}/attendance-roster",
+            headers={"Authorization": f"Bearer {access_token}"},
+        )
+        self._raise_for_error(resp)
+        data = resp.json()
+        if not isinstance(data, list):
+            raise BackendAPIError(502, "Church_server returned an invalid event attendance roster")
+        return data
+
+    async def get_my_active_event_assignments(self, access_token: str) -> list[dict[str, Any]]:
+        """Fetch field assignments currently inside their server-managed collection windows."""
+        resp = await self._request(
+            "GET", "/api/v1/programs/assignments/me/active",
+            headers={"Authorization": f"Bearer {access_token}"},
+        )
+        self._raise_for_error(resp)
+        data = resp.json()
+        if not isinstance(data, list):
+            raise BackendAPIError(502, "Church_server returned invalid active event assignments")
+        return data
+
+    async def get_latest_information(self, access_token: str) -> dict[str, Any]:
+        """Fetch the latest published information sheet in the signed-in user's scope."""
+        resp = await self._request(
+            "GET", "/api/v1/information/latest",
+            headers={"Authorization": f"Bearer {access_token}"},
+        )
+        self._raise_for_error(resp)
+        data = resp.json()
+        if not isinstance(data, dict):
+            raise BackendAPIError(502, "Church_server returned an invalid information sheet")
+        return data
+
     async def push_sync_batch(self, payload: dict[str, Any], access_token: str) -> dict[str, Any]:
         """Submits batch synchronization to FastAPI backend POST /api/v1/sync/batch."""
         endpoints = ["/api/v1/sync/batch", "/api/v1/sync"]
@@ -191,6 +227,9 @@ class BackendClient:
                     endpoint,
                     json=payload,
                     headers={"Authorization": f"Bearer {access_token}"},
+                    # Backend persists batch items independently; give larger offline
+                    # queues enough time to finish before falling back to a stale route.
+                    timeout=max(self.timeout, 90),
                 )
                 if resp.status_code in (200, 201):
                     data = resp.json() if resp.headers.get("content-type", "").startswith("application/json") else {}
