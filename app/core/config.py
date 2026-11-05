@@ -4,6 +4,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 from dotenv import load_dotenv
+from app import __version__ as APP_VERSION
 
 BASE_DIR = Path(__file__).resolve().parents[2]
 load_dotenv(BASE_DIR / ".env")

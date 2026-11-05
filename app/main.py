@@ -6,7 +6,7 @@ from typing import AsyncIterator
 
 from fastapi import FastAPI
 
-from .core.config import APP_ENV, APP_NAME
+from .core.config import APP_ENV, APP_NAME, APP_VERSION
 from .presentation.app_factory import create_app
 from .services.auth_session import validate_session_configuration
 
@@ -32,7 +32,7 @@ app = FastAPI(
 
 @app.get("/health", include_in_schema=False)
 async def health() -> dict[str, str]:
-    return {"status": "ok", "app": APP_NAME, "version": "1.0.0"}
+    return {"status": "ok", "app": APP_NAME, "version": APP_VERSION}
 
 
 # FastHTML remains responsible for all existing HTML, API proxy, and asset routes.

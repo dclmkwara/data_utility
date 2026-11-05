@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import json
 from typing import Any
-from fasthtml.common import A, Body, Button, Div, H1, Header, I, Main, Nav, P, Script, Small, Span, Title
+from fasthtml.common import A, Body, Button, Div, Footer, H1, Header, I, Main, Nav, P, Script, Small, Span, Title
 from faststrap import BottomNav, BottomNavItem, Container, Modal
 
 from ...core.config import APP_NAME
@@ -114,6 +114,10 @@ def app_shell(
                         ) if page_title != "Home" else Span(),
                         Div(content, cls="dclm-page-content"),
                         cls="px-2"
+                    ),
+                    Footer(
+                        P("Powered Kwara State ICT Unit", cls="small text-muted text-center mb-0 py-2"),
+                        role="contentinfo",
                     ),
                     cls="flex-grow-1"
                 ),

@@ -3,9 +3,10 @@ from __future__ import annotations
 
 from typing import Any
 from fasthtml.common import A, Button, Div, H3, I, Input, Label, Option, P, Select, Small, Span
-from faststrap import Card, Col, Fx, Row
+from faststrap import Button as FsButton, Card, Col, Fx, Row
 
 from ..components.shell import app_shell
+from ...core.config import APP_VERSION
 
 
 def setup_settings_routes(app: Any) -> None:
@@ -63,10 +64,25 @@ def setup_settings_routes(app: Any) -> None:
             cls="dclm-card mb-3"
         )
 
+        install_card = Card(
+            Div(
+                H3("Install the app", cls="h6 fw-bold text-dark mb-2"),
+                P("Add Field Utility to your Home Screen for quick, full-screen access.", cls="text-muted small mb-3"),
+                FsButton("Install app", variant="primary", type="button", id="btn-install-app", cls="w-100 mb-2"),
+                Small("Android: open this page in Chrome, tap Install app, and confirm. If the prompt does not appear, use Chrome menu ⋮ → Install app or Add to Home screen.",
+                      cls="d-block text-muted mb-2"),
+                Small("iPhone/iPad: open this page in Safari, tap Share, choose Add to Home Screen, then tap Add.",
+                      cls="d-block text-muted mb-2"),
+                Small("Open this page in your browser before installing. Installation is not available inside some in-app browsers.",
+                      id="settings-install-status", role="status", aria_live="polite", cls="d-block text-muted"),
+            ),
+            cls="dclm-card mb-3"
+        )
+
         app_info_card = Card(
             Div(
                 H3("About this app", cls="h6 fw-bold text-dark mb-3"),
-                P("DCLM Field Utility · Version 1.0.0", cls="small text-dark mb-2"),
+                P(f"DCLM Field Utility · Version {APP_VERSION}", cls="small text-dark mb-2"),
                 P("Church records are protected by your assigned account and location access.", cls="text-muted small mb-0"),
                 Div(id="settings-connection-status", cls="small text-muted mt-3"),
             ),
@@ -99,6 +115,7 @@ def setup_settings_routes(app: Any) -> None:
             content=Div(
                 account_card,
                 storage_card,
+                install_card,
                 app_info_card,
                 links_card,
                 cls="dclm-page-content"

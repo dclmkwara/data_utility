@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "dclm-field-utility"
-version = "1.0.0"
+version = "1.1.0"
 description = "Offline-first field data capture for authorized DCLM church workers"
 requires-python = ">=3.11"
 dependencies = [

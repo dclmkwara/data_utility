@@ -15,6 +15,20 @@ const DCLM_APP = (function () {
   let rosterState = "not_loaded";
   let hapticsFailureNotified = false;
   let confirmResolver = null;
+  let deferredInstallPrompt = null;
+
+  window.addEventListener("beforeinstallprompt", (event) => {
+    event.preventDefault();
+    deferredInstallPrompt = event;
+    const status = document.getElementById("settings-install-status");
+    if (status) status.textContent = "Installation is ready. Tap Install app to continue.";
+  });
+
+  window.addEventListener("appinstalled", () => {
+    deferredInstallPrompt = null;
+    const status = document.getElementById("settings-install-status");
+    if (status) status.textContent = "Field Utility has been installed on this device.";
+  });
 
   // Local counter tally state
   let counterState = {
@@ -1813,6 +1827,34 @@ const DCLM_APP = (function () {
     if (userEmail) userEmail.textContent = user.email || "Not provided";
     if (userRole) userRole.textContent = (user.roles || []).join(", ") || "Field user";
     if (userLocation) userLocation.textContent = displayLocationId(user.location_id);
+    const installButton = qs("#btn-install-app");
+    const installStatus = qs("#settings-install-status");
+    const isStandalone = window.matchMedia?.("(display-mode: standalone)").matches || navigator.standalone === true;
+    if (isStandalone && installStatus) {
+      installStatus.textContent = "Field Utility is already installed on this device.";
+    }
+    installButton?.addEventListener("click", async () => {
+      if (isStandalone) {
+        showToast("Field Utility is already installed.", "info");
+        return;
+      }
+      if (!deferredInstallPrompt) {
+        const isAppleMobile = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+        const message = isAppleMobile
+          ? "In Safari, tap Share, choose Add to Home Screen, then tap Add."
+          : "If no install prompt appears, open the browser menu and choose Install app or Add to Home screen.";
+        if (installStatus) installStatus.textContent = message;
+        showToast(message, "info");
+        return;
+      }
+      const promptEvent = deferredInstallPrompt;
+      deferredInstallPrompt = null;
+      promptEvent.prompt();
+      const choice = await promptEvent.userChoice;
+      const message = choice?.outcome === "accepted" ? "Field Utility is being installed." : "Installation was cancelled. You can try again from this screen.";
+      if (installStatus) installStatus.textContent = message;
+      showToast(message, choice?.outcome === "accepted" ? "success" : "info");
+    });
     updateNetworkStatus();
     refreshHapticsSetting();
     qs("#setting-haptics-enabled")?.addEventListener("change", async (event) => {

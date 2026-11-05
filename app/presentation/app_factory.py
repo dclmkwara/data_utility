@@ -6,7 +6,7 @@ from fasthtml.common import FastHTML, Link, Meta, Script
 from faststrap import add_bootstrap, mount_assets
 from starlette.responses import FileResponse
 
-from ..core.config import APP_NAME
+from ..core.config import APP_NAME, APP_VERSION
 from ..core.theme import FASTSTRAP_THEME
 from .routes.api_proxy import setup_api_proxy_routes
 from .routes.auth import setup_auth_routes
@@ -63,7 +63,7 @@ def create_app() -> FastHTML:
         Script(src="/assets/js/auth.js?v=4", defer=True),
         Script(src="/assets/js/haptics.js?v=5", defer=True),
         Script(src="/assets/js/sync.js?v=13", defer=True),
-        Script(src="/assets/js/app.js?v=26", defer=True),
+        Script(src="/assets/js/app.js?v=27", defer=True),
         Script(sw_registration),
     ]
 
@@ -90,6 +90,6 @@ def create_app() -> FastHTML:
 
     @app.get("/health")
     def health():
-        return {"status": "ok", "app": APP_NAME, "version": "1.0.0"}
+        return {"status": "ok", "app": APP_NAME, "version": APP_VERSION}
 
     return app
