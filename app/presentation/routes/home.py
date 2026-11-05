@@ -103,6 +103,21 @@ def setup_home_routes(app: Any) -> None:
             cls="g-2"
         )
 
+        worker_registration_card = A(
+            Div(
+                I(cls="bi bi-person-badge-fill fs-4 text-primary me-3"),
+                Div(
+                    Span("Register a Worker Candidate", cls="fw-bold text-dark d-block"),
+                    Small("Submit a candidate for Group Pastor review.", cls="text-muted"),
+                ),
+                I(cls="bi bi-chevron-right text-muted ms-auto"),
+                cls="d-flex align-items-center p-3",
+            ),
+            href="/registration?mode=worker_candidate",
+            cls="dclm-card d-block text-decoration-none mb-3",
+            aria_label="Register a worker candidate",
+        )
+
         # Secondary Links
         secondary_card = Card(
             Div(
@@ -156,6 +171,7 @@ def setup_home_routes(app: Any) -> None:
                 hero_card,
                 queue_card,
                 tools_grid,
+                worker_registration_card,
                 secondary_card,
                 cls="dclm-page-content"
             ),

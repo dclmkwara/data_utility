@@ -140,7 +140,7 @@ def test_fastapi_cloud_entrypoint_mounts_fasthtml_routes_and_health():
     assert cloud_client.get("/health").json() == {
         "status": "ok",
         "app": "DCLM Field Utility",
-        "version": "1.1.0",
+        "version": "1.1.1",
     }
     assert cloud_client.get("/login").status_code == 200
     assert cloud_client.get("/counter").status_code == 200
@@ -150,7 +150,7 @@ def test_service_worker_is_available_at_root_scope():
     response = client.get("/sw.js")
     assert response.status_code == 200
     assert response.headers["service-worker-allowed"] == "/"
-    assert 'const CACHE_NAME = "dclm-utility-v34"' in response.text
+    assert 'const CACHE_NAME = "dclm-utility-v35"' in response.text
 
 
 def test_settings_explain_installation_for_android_and_ios():
@@ -159,7 +159,7 @@ def test_settings_explain_installation_for_android_and_ios():
     assert 'id="btn-install-app"' in response.text
     assert "Android: open this page in Chrome" in response.text
     assert "iPhone/iPad: open this page in Safari" in response.text
-    assert "Powered Kwara State ICT Unit" in response.text
+    assert "Powered by: Kwara State ICT Unit" in response.text
 
 
 def test_application_shell_does_not_require_remote_runtime_scripts():

@@ -1352,6 +1352,9 @@ const DCLM_APP = (function () {
       newcomerBtn.addEventListener("click", () => setRegistrationMode("newcomer"));
     }
     workerCandidateBtn?.addEventListener("click", () => setRegistrationMode("worker_candidate"));
+    if (new URLSearchParams(window.location.search).get("mode") === "worker_candidate") {
+      setRegistrationMode("worker_candidate");
+    }
 
     const regSubmitBtn = qs("#btn-submit-registration");
     if (regSubmitBtn) {

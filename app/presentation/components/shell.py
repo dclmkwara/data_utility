@@ -116,7 +116,7 @@ def app_shell(
                         cls="px-2"
                     ),
                     Footer(
-                        P("Powered Kwara State ICT Unit", cls="small text-muted text-center mb-0 py-2"),
+                        P("Powered by: Kwara State ICT Unit", cls="small text-muted text-center mb-0 py-2"),
                         role="contentinfo",
                     ),
                     cls="flex-grow-1"

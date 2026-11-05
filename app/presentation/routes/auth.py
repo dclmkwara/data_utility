@@ -43,7 +43,7 @@ def setup_auth_routes(app: Any) -> None:
                         card,
                         Small("Offline access is available on this device after a successful sign-in.",
                               cls="text-muted d-block mt-3 text-center"),
-                        Small("Powered Kwara State ICT Unit", cls="text-muted d-block mt-4 text-center"),
+                        Small("Powered by: Kwara State ICT Unit", cls="text-muted d-block mt-4 text-center"),
                         cls="w-100", style="max-width: 440px; margin: 10vh auto; padding: 1rem;",
                     ),
                     cls="container",
