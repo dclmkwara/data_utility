@@ -18,7 +18,7 @@ def setup_registration_routes(app: Any) -> None:
             Row(
                 Col(
                     Button(
-                        I(cls="bi bi-heart-fill me-1"), "Fresh Convert",
+                        I(cls="bi bi-heart-fill me-1"), "Convert",
                         type="button",
                         id="toggle-btn-convert",
                         cls="btn btn-primary w-100 rounded-pill py-2 fw-semibold",
@@ -27,7 +27,7 @@ def setup_registration_routes(app: Any) -> None:
                 ),
                 Col(
                     Button(
-                        I(cls="bi bi-person-badge me-1"), "First-Time Guest",
+                        I(cls="bi bi-person-badge me-1"), "Guest",
                         type="button",
                         id="toggle-btn-newcomer",
                         cls="btn btn-outline-secondary w-100 rounded-pill py-2 fw-semibold",
@@ -36,7 +36,7 @@ def setup_registration_routes(app: Any) -> None:
                 ),
                 Col(
                     Button(
-                        I(cls="bi bi-person-vcard me-1"), "Worker Candidate",
+                        I(cls="bi bi-person-vcard me-1"), "Worker",
                         type="button",
                         id="toggle-btn-worker-candidate",
                         cls="btn btn-outline-secondary w-100 rounded-pill py-2 fw-semibold",
@@ -69,10 +69,10 @@ def setup_registration_routes(app: Any) -> None:
                         Label("Marital Status", for_="candidate_marital_status", cls="form-label small fw-bold text-muted mb-1"),
                         Select(Option("Select...", value=""), *[Option(label, value=key) for key, label in MARITAL_STATUSES], id="candidate_marital_status", cls="form-select rounded-3 mb-3"),
                     ),
-                    P("This submits a worker candidate to your assigned location. The candidate remains pending until reviewed by the Group Pastor.", cls="small text-muted"),
+                    P("This submits a worker's information to your assigned location. The candidate remains pending until reviewed by the Group Pastor.", cls="small text-muted"),
                     Row(
                         Col(Button("Clear Form", type="reset", cls="btn btn-outline-secondary w-100 rounded-pill py-2"), cols=4),
-                        Col(Button("Submit Worker Candidate", type="button", id="btn-submit-worker-candidate", cls="btn btn-primary w-100 rounded-pill py-2 fw-semibold"), cols=8),
+                        Col(Button("Submit", type="button", id="btn-submit-worker-candidate", cls="btn btn-primary w-100 rounded-pill py-2 fw-semibold"), cols=8),
                         cls="g-2 pt-2 border-top",
                     ),
                     id="worker-candidate-entry-form",
