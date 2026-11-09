@@ -1,4 +1,4 @@
-"""Test suite for DCLM Field Utility application."""
+﻿"""Test suite for DCLM Field Utility application."""
 from __future__ import annotations
 
 import sys
@@ -122,6 +122,76 @@ def test_setup_exposes_editable_reporting_scope_and_keeps_collection_location_re
     assert "A broader or different location scope requires a matching scheduled event." in app_js
 
 
+def test_original_demographic_counter_with_optional_split_count_ui_is_present():
+    counter = client.get("/counter")
+    assert counter.status_code == 200
+    assert 'id="count-mode"' in counter.text
+    assert 'type="checkbox"' in counter.text
+    assert "I'm counting only part of the congregation" in counter.text
+    assert 'id="count-section-label"' in counter.text
+    assert 'id="count-section-suggestion-chips"' in counter.text
+    assert 'id="count-service-picker"' in counter.text
+    assert 'id="count-service-id"' in counter.text
+    assert 'id="count-group-summary"' in counter.text
+    assert 'id="btn-finalize-count-batch"' in counter.text
+    assert 'id="count-section-suggestions-manager"' in counter.text
+    assert "Edit Numbers" in counter.text
+    assert "Reset" in counter.text
+    assert "TOTAL POPULATION COUNT" in counter.text
+    assert "Rapid one-thumb demographic counting with haptic sensory feedback." in counter.text
+    labels = [counter.text.index(label) for label in ("Adult Male", "Adult Female", "Youth Male", "Youth Female", "Boys", "Girls")]
+    assert labels == sorted(labels)
+    assert "Tithe &amp; Offering Collection" in counter.text
+    assert "Save Count" in counter.text
+    assert "Enter one congregation total" not in counter.text
+
+
+def test_offline_submission_edits_are_queued_and_server_window_is_checked_on_sync():
+    db_js = Path("assets/js/db.js").read_text(encoding="utf-8")
+    sync_js = Path("assets/js/sync.js").read_text(encoding="utf-8")
+    app_js = Path("assets/js/app.js").read_text(encoding="utf-8")
+    assert "submission_edits_queue" in db_js
+    assert "DB_VERSION = 9" in db_js
+    assert "syncQueuedSubmissionEdits" in sync_js
+    assert 'item.resource === "count"' in sync_js
+    assert 'response.status >= 400 && response.status < 500' in sync_js
+    assert "The server checks the edit window when syncing" in app_js
+    assert "Edit refused:" in app_js
+    assert "function escapeAttribute(value)" in app_js
+    assert 'data-submitted-count-form="${escapeAttribute(item.id)}"' in app_js
+    assert 'data-sync-id="${escapeAttribute(item.client_id)}"' in app_js
+    assert 'service_id: qs("#count-service-id")?.value || "main"' in app_js
+    queue = client.get("/queues")
+    assert queue.status_code == 200
+    assert "Submitted counts you can still edit" in queue.text
+    assert 'id="submitted-worker-attendance-edits"' in queue.text
+    app_js = Path("assets/js/app.js").read_text(encoding="utf-8")
+    sync_js = Path("assets/js/sync.js").read_text(encoding="utf-8")
+    assert '"/api/counts/editable"' in app_js
+    assert "edit_id: crypto.randomUUID()" in app_js
+    assert 'count_mode: item.count_mode || "single"' in sync_js
+    assert 'data-resolve-action="relabel_both"' in app_js
+    assert 'data-resolve-action="replace"' not in app_js
+    assert "confirmation_required" in app_js
+    assert "Close anyway?" in app_js
+def test_submitted_count_edit_proxy_is_authenticated_and_scoped_to_backend_actor(monkeypatch):
+    assert client.get("/api/counts/editable").status_code == 401
+    test_client = _authenticated_client(monkeypatch)
+    count_id = "11111111-1111-4111-8111-111111111111"
+    rows = [{"id": count_id, "status": "pending", "edits_remaining": 3}]
+    fetch = AsyncMock(return_value=rows)
+    edit = AsyncMock(return_value={"id": count_id, "status": "pending", "revision": 1})
+    monkeypatch.setattr(backend_client, "list_my_editable_counts", fetch)
+    monkeypatch.setattr(backend_client, "edit_count_submission", edit)
+    response = test_client.get("/api/counts/editable")
+    assert response.status_code == 200
+    assert response.json()["items"] == rows
+    fetch.assert_awaited_once()
+    response = test_client.post(f"/api/counts/{count_id}/edit", json={"edit_id": "edit", "base_revision": 0, "values": {}})
+    assert response.status_code == 200
+    edit.assert_awaited_once()
+
+
 def test_production_session_configuration_requires_an_explicit_key(monkeypatch):
     from app.services import auth_session
 
@@ -150,7 +220,7 @@ def test_service_worker_is_available_at_root_scope():
     response = client.get("/sw.js")
     assert response.status_code == 200
     assert response.headers["service-worker-allowed"] == "/"
-    assert 'const CACHE_NAME = "dclm-utility-v35"' in response.text
+    assert 'const CACHE_NAME = "dclm-utility-v40"' in response.text
 
 
 def test_settings_explain_installation_for_android_and_ios():

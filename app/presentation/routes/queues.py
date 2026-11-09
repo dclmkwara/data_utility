@@ -74,6 +74,38 @@ def setup_queue_routes(app: Any) -> None:
             )
         )
 
+        submitted_counts = Card(
+            Div(
+                H3("Submitted counts you can still edit", cls="h6 fw-bold mb-1"),
+                P("Only your own pending or returned counts appear here. Approval locks a count. Returned reports show the pastor's reason.", cls="small text-muted mb-2"),
+                Div(P("Loading your submitted counts…", cls="small text-muted"), id="submitted-count-edits"),
+            ),
+            cls="dclm-card mb-3",
+        )
+
+        submitted_offerings = Card(
+            Div(
+                H3("Submitted offerings you can still edit", cls="h6 fw-bold mb-1"),
+                P("Your offering edits are limited to 24 hours and three changes; approval locks the record. A pastor may return it to reopen the edit window.", cls="small text-muted mb-2"),
+                Div(P("Loading your submitted offerings…", cls="small text-muted"), id="submitted-offering-edits"),
+            ),
+            cls="dclm-card mb-3",
+        )
+
+        submitted_attendance = Card(
+            Div(H3("Submitted worker attendance you can still edit", cls="h6 fw-bold mb-1"),
+                P("Your own attendance captures can be edited for 24 hours, up to three times. Each change is recorded.", cls="small text-muted mb-2"),
+                Div(P("Loading your submitted worker attendance…", cls="small text-muted"), id="submitted-worker-attendance-edits")),
+            cls="dclm-card mb-3",
+        )
+        submitted_fellowship = Card(
+            Div(H3("Submitted fellowship records you can still edit", cls="h6 fw-bold mb-1"),
+                P("Fellowship attendance and offerings can be edited for 24 hours, up to three times. Each change is recorded.", cls="small text-muted mb-2"),
+                Div(P("Loading your submitted fellowship attendance…", cls="small text-muted"), id="submitted-fellowship-attendance-edits"),
+                Div(P("Loading your submitted fellowship offerings…", cls="small text-muted"), id="submitted-fellowship-offering-edits")),
+            cls="dclm-card mb-3",
+        )
+
         count_edit_rows = [
             Div(
                 Label(category["label"], for_=f"queued_edit_{category['key']}", cls="form-label small fw-semibold"),
@@ -104,6 +136,10 @@ def setup_queue_routes(app: Any) -> None:
             content=Div(
                 sync_banner,
                 pending_section,
+                submitted_counts,
+                submitted_offerings,
+                submitted_attendance,
+                submitted_fellowship,
                 recent_section,
                 edit_count_modal,
             ),

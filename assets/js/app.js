@@ -72,7 +72,7 @@ const DCLM_APP = (function () {
   async function persistCountDraft() {
     if (!activeSetup?.location_id) return;
     await DCLM_DB.saveCountDraft({
-      counts: { ...counterState },
+      counts: { ...counterState, total: Object.values(counterState).reduce((a, b) => a + b, 0) },
       event_id: activeSetup.event_id || null,
       location_id: activeSetup.location_id,
       setup: { ...activeSetup },
@@ -194,6 +194,14 @@ const DCLM_APP = (function () {
 
   function escapeHTML(value) {
     return safeUiText(value).replace(/[&<>"']/g, (char) => ({
+      "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
+    })[char]);
+  }
+
+  // UUIDs are safe to HTML-escape for attribute use, but safeUiText redacts
+  // them for visible text. Never pass identifiers through that text helper.
+  function escapeAttribute(value) {
+    return String(value ?? "").replace(/[&<>"']/g, (char) => ({
       "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
     })[char]);
   }
@@ -327,6 +335,10 @@ const DCLM_APP = (function () {
       if (shieldEl) shieldEl.classList.remove("d-none");
       // Hide all content wraps until setup is done
       qsa("[id$='-content-wrap']").forEach((el) => el.classList.add("d-none"));
+    }
+    if (activeSetup?.location_id && qs("#count-service-picker")) {
+      void loadPriorCountServices();
+      void loadCountSectionSuggestions();
     }
   }
 
@@ -808,11 +820,31 @@ const DCLM_APP = (function () {
         await refreshActiveSetup();
         showToast("Restored the unfinished tally and its original event from this device.", "info");
       }
-      counterState = { ...counterState, ...draft.counts };
+      const { total: _draftTotal, ...draftCategories } = draft.counts || {};
+      counterState = { ...counterState, ...draftCategories };
       if (draft.setup && eventContextKey(draft.setup) === eventContextKey(activeSetup) && draft.location_id === activeSetup?.location_id) {
         showToast("Restored the unfinished tally from this device.", "info");
       }
     }
+    counterState = { adult_male: 0, adult_female: 0, youth_male: 0, youth_female: 0, boys: 0, girls: 0 };
+    if (draft && draft.setup && eventContextKey(draft.setup) === eventContextKey(activeSetup) && draft.location_id === activeSetup?.location_id) {
+      const { total: _oldDraftTotal, ...draftCategories } = draft.counts || {};
+      counterState = { ...counterState, ...draftCategories };
+    }
+    updateCounterDisplays();
+    void loadCountSectionSuggestions();
+    const countMode = qs("#count-mode");
+    const sectionLabelWrap = qs("#count-section-label-wrap");
+    const sectionSuggestionsManager = qs("#count-section-suggestions-manager");
+    const sectionLabelInput = qs("#count-section-label");
+    const syncCountModeFields = () => {
+      const isSection = Boolean(countMode?.checked);
+      if (sectionLabelWrap) sectionLabelWrap.hidden = !isSection;
+      if (sectionSuggestionsManager) sectionSuggestionsManager.hidden = !isSection;
+      if (sectionLabelInput) sectionLabelInput.required = isSection;
+    };
+    countMode?.addEventListener("change", syncCountModeFields);
+    syncCountModeFields();
     qsa(".dclm-count-tile").forEach((tile) => {
       tile.addEventListener("click", async (e) => {
         e.preventDefault();
@@ -917,6 +949,23 @@ const DCLM_APP = (function () {
           return;
         }
 
+        try {
+          const params = new URLSearchParams({
+            location_id: activeSetup.location_id,
+            service_date: activeSetup.service_date,
+            fund_type: fundType,
+            program_domain: activeSetup.program_domain || "",
+            program_type: activeSetup.program_type || "",
+          });
+          if (activeSetup.event_id) params.set("event_id", activeSetup.event_id);
+          const preflight = await window.DCLM_AUTH.apiFetch(`/api/offerings/preflight?${params.toString()}`);
+          const check = await preflight.json();
+          if (!preflight.ok || !check.ok) throw new Error(check.error || "Offering check failed.");
+          if (check.already_recorded && !window.confirm("An offering was already recorded for this service. Save another one?")) return;
+        } catch (error) {
+          if (!window.confirm("The existing offering check is unavailable. Continue saving this amount?")) return;
+        }
+
         const item = {
           client_id: generateUUID(),
           location_id: activeSetup.location_id,
@@ -944,6 +993,8 @@ const DCLM_APP = (function () {
     // Save & Queue Count Batch
     const finalizeCountBtn = qs("#btn-finalize-count-batch");
     if (finalizeCountBtn) {
+      const countMode = qs("#count-mode");
+      const sectionLabelInput = qs("#count-section-label");
       finalizeCountBtn.addEventListener("click", async (e) => {
         e.preventDefault();
         e.stopPropagation();
@@ -962,9 +1013,13 @@ const DCLM_APP = (function () {
         }
 
         const total = Object.values(counterState).reduce((a, b) => a + b, 0);
-        if (total === 0) {
-          showToast("Cannot queue an empty headcount of zero.", "warning");
-          haptic("warning");
+        if (!Number.isInteger(total) || total < 0 || total > 999999) {
+          showToast("Enter a whole number from 0 to 999,999.", "warning");
+          return;
+        }
+        if (countMode?.checked && !sectionLabelInput?.value.trim()) {
+          showToast("Enter a name for this count section.", "warning");
+          sectionLabelInput?.focus();
           return;
         }
 
@@ -979,7 +1034,10 @@ const DCLM_APP = (function () {
           youth_female: counterState.youth_female,
           boys: counterState.boys,
           girls: counterState.girls,
-          total: total,
+          total,
+          count_mode: countMode?.checked ? "section" : "single",
+          section_label: countMode?.checked ? sectionLabelInput?.value.trim() : null,
+          service_id: qs("#count-service-id")?.value || "main",
           captured_at: new Date().toISOString(),
           church_type: activeSetup.church_type,
           program_level: activeSetup.program_level,
@@ -995,10 +1053,149 @@ const DCLM_APP = (function () {
         await DCLM_DB.clearCountDraft();
         haptic("success");
 
+        await showCountGroupSummary(batch, result);
+
         // Optional: clear active tallies after successful queue
         Object.keys(counterState).forEach((k) => { counterState[k] = 0; });
+        if (sectionLabelInput) sectionLabelInput.value = "";
         updateCounterDisplays();
       });
+    }
+  }
+
+  async function showCountGroupSummary(batch, result) {
+    const target = qs("#count-group-summary");
+    if (!target) return;
+    target.hidden = false;
+    if (!result.submitted) {
+      target.textContent = "Count saved on this device. The service total and reported sections will appear after it syncs.";
+      return;
+    }
+    try {
+      const response = await window.DCLM_AUTH.apiFetch("/api/counts/editable");
+      const data = await response.json();
+      if (!response.ok || !data.ok) throw new Error(typeof data.error === "string" ? data.error : "Unable to load this count group.");
+      const serviceId = batch.service_id || "main";
+      const match = (data.items || []).find((item) =>
+        item.date === batch.service_date && item.program_type === batch.program_type
+        && (item.event_id || "") === (batch.event_id || "")
+        && (item.service_id || "main") === serviceId
+      );
+      if (!match) {
+        target.textContent = "Count submitted. The running group total is not available yet; check Sync Queues if it does not appear shortly.";
+        return;
+      }
+      if (match.count_group_state === "conflict") {
+        target.textContent = `Count group conflict for ${serviceId}. It is excluded from totals until the usher resolves it.`;
+        return;
+      }
+      const sections = [...(match.reported_sections || [])].sort((a, b) => a.localeCompare(b)).join(", ") || "No section labels (single count)";
+      target.innerHTML = `Running group total: ${Number(match.group_total || 0).toLocaleString()} · sections reported: ${escapeHTML(sections)}${match.count_group_state !== "complete" ? ` · <a href="#" id="btn-close-count-group-summary" data-count-id="${escapeAttribute(match.id)}">Close count</a>` : ""}`;
+      target.querySelector("#btn-close-count-group-summary")?.addEventListener("click", async (event) => {
+        event.preventDefault();
+        const endpoint = `/api/counts/groups/${encodeURIComponent(match.id)}/close`;
+        let closeResponse = await window.DCLM_AUTH.apiFetch(endpoint, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({}) });
+        let closeData = await closeResponse.json();
+        if (closeResponse.ok && closeData.confirmation_required) {
+          const missing = (closeData.missing_suggested_labels || []).join(", ");
+          if (!window.confirm(`Last time also had ${missing}. Close anyway?`)) return;
+          closeResponse = await window.DCLM_AUTH.apiFetch(endpoint, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ confirm_missing_suggestions: true }) });
+          closeData = await closeResponse.json();
+        }
+        if (!closeResponse.ok || !closeData.ok) throw new Error(closeData.error || "Could not close the count.");
+        await showCountGroupSummary(batch, { submitted: true });
+      });
+    } catch (error) {
+      target.textContent = `Count submitted, but the group summary could not load: ${error.message || "connection error"}`;
+      target.classList.add("alert-warning");
+    }
+  }
+
+  async function loadCountSectionSuggestions() {
+    const input = qs("#count-section-label");
+    const manager = qs("#count-section-suggestions-manager");
+    const chips = qs("#count-section-suggestion-chips");
+    if (!input || !activeSetup?.location_id) return;
+    try {
+      const response = await window.DCLM_AUTH.apiFetch(`/api/counts/suggestions/${encodeURIComponent(activeSetup.location_id)}?program_domain=${encodeURIComponent(activeSetup.program_domain || "")}`);
+      const data = await response.json();
+      if (!response.ok || !data.ok) return;
+      let datalist = qs("#count-section-suggestions");
+      if (!datalist) {
+        datalist = document.createElement("datalist");
+        datalist.id = "count-section-suggestions";
+        input.insertAdjacentElement("afterend", datalist);
+      }
+      const visibleItems = (data.items || []).filter((item) => !item.hidden);
+      if (!visibleItems.length) visibleItems.push(...["A", "B", "C"].map((label) => ({ label, hidden: false })));
+      datalist.replaceChildren(...visibleItems.map((item) => new Option(item.label, item.label)));
+      if (chips) {
+        chips.replaceChildren(...visibleItems.map((item) => {
+          const chip = document.createElement("button");
+          chip.type = "button";
+          chip.className = "btn btn-sm btn-outline-secondary rounded-pill";
+          chip.textContent = item.label;
+          chip.setAttribute("aria-label", `Use section name ${item.label}`);
+          chip.addEventListener("click", () => { input.value = item.label; input.focus(); });
+          return chip;
+        }));
+      }
+      if (!manager) return;
+      const canManage = Boolean(window.DCLM_CURRENT_USER?.permissions?.includes("counts:update"));
+      if (!canManage) {
+        manager.innerHTML = visibleItems.length
+          ? `<details><summary>Suggested sections</summary><p class="small mt-2 mb-0">${visibleItems.map((item) => escapeHTML(item.label)).join(", ")}</p></details>`
+          : "";
+        return;
+      }
+      if (data.items?.length) {
+        manager.innerHTML = `<details><summary>Manage section suggestions</summary><div class="d-grid gap-2 mt-2">${data.items.map((item, index) => `<div class="d-flex align-items-center gap-2"><input class="form-control form-control-sm" aria-label="Suggestion ${index + 1}" data-section-suggestion-label="${escapeHTML(item.label)}" value="${escapeHTML(item.label)}"><label class="small text-nowrap"><input type="checkbox" data-section-suggestion-hidden="${escapeHTML(item.label)}" ${item.hidden ? "checked" : ""}> Hide</label></div>`).join("")}<div class="d-flex gap-2"><input class="form-control form-control-sm" id="new-section-suggestion" placeholder="Add a suggestion"><button class="btn btn-sm btn-outline-secondary" type="button" id="btn-save-section-suggestions">Save</button></div></div></details>`;
+      } else {
+        manager.innerHTML = `<details><summary>Manage section suggestions</summary><div class="d-flex gap-2 mt-2"><input class="form-control form-control-sm" id="new-section-suggestion" placeholder="Add a suggestion"><button class="btn btn-sm btn-outline-secondary" type="button" id="btn-save-section-suggestions">Save</button></div></details>`;
+      }
+      manager.querySelector("#btn-save-section-suggestions")?.addEventListener("click", async (event) => {
+        const button = event.currentTarget;
+        await runButtonAction(button, "Saving…", async () => {
+          const payload = (data.items || []).map((item) => ({
+            label: manager.querySelector(`[data-section-suggestion-label="${CSS.escape(item.label)}"]`)?.value.trim() || item.label,
+            previous_label: item.label,
+            hidden: Boolean(manager.querySelector(`[data-section-suggestion-hidden="${CSS.escape(item.label)}"]`)?.checked),
+          }));
+          const newSuggestion = manager.querySelector("#new-section-suggestion")?.value.trim();
+          if (newSuggestion) payload.push({ label: newSuggestion, hidden: false });
+          const saved = await window.DCLM_AUTH.apiFetch(`/api/counts/suggestions/${encodeURIComponent(activeSetup.location_id)}`, {
+            method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
+          });
+          const result = await saved.json();
+          if (!saved.ok || !result.ok) throw new Error(result.error || "Suggestions could not be saved.");
+          showToast("Section suggestions updated.", "success");
+          await loadCountSectionSuggestions();
+        });
+      });
+    } catch (_) { /* Suggestions are optional; count entry remains available. */ }
+  }
+
+  async function loadPriorCountServices() {
+    const wrapper = qs("#count-service-picker");
+    const select = qs("#count-service-id");
+    if (!wrapper || !select || !activeSetup?.location_id || !activeSetup?.service_date || !activeSetup?.program_type) return;
+    wrapper.hidden = true;
+    try {
+      const params = new URLSearchParams({ date: activeSetup.service_date, program_type: activeSetup.program_type });
+      if (activeSetup.event_id) params.set("event_id", activeSetup.event_id);
+      const response = await window.DCLM_AUTH.apiFetch(`/api/counts/services/${encodeURIComponent(activeSetup.location_id)}?${params}`);
+      const data = await response.json();
+      if (!response.ok || !data.ok) return;
+      const services = [...new Set((data.services || []).map((value) => String(value).trim()).filter(Boolean))];
+      if (services.length <= 1) {
+        select.replaceChildren(new Option("Main service", "main", true, true));
+        return;
+      }
+      if (!services.includes("main")) services.unshift("main");
+      select.replaceChildren(...services.map((value) => new Option(value === "main" ? "Main service" : value, value)));
+      wrapper.hidden = false;
+    } catch (_) {
+      // The service picker stays hidden; the church's default session remains main.
     }
   }
 
@@ -1586,6 +1783,9 @@ const DCLM_APP = (function () {
     const badgeEl = qs("#pending-queue-badge");
 
     if (!listEl) return;
+    await renderSubmittedCountEdits();
+    await renderSubmittedOfferingEdits();
+    await renderAllEditableRecords();
 
     await DCLM_DB.normalizeLegacyAttendanceQueue();
 
@@ -1603,9 +1803,10 @@ const DCLM_APP = (function () {
     const fellowshipMembers = await DCLM_DB.getAllFromQueue("fellowship_members_queue");
     const fellowshipAttendance = await DCLM_DB.getAllFromQueue("fellowship_attendance_queue");
     const fellowshipOfferings = await DCLM_DB.getAllFromQueue("fellowship_offerings_queue");
+    const submissionEdits = await DCLM_DB.getAllFromQueue("submission_edits_queue");
 
     const totalBatches = counts.length + offerings.length + attendance.length + registrations.length + workerCandidates.length
-      + fellowshipMembers.length + fellowshipAttendance.length + fellowshipOfferings.length;
+      + fellowshipMembers.length + fellowshipAttendance.length + fellowshipOfferings.length + submissionEdits.length;
     if (badgeEl) badgeEl.textContent = `${totalBatches} Pending`;
 
     if (totalBatches === 0) {
@@ -1624,9 +1825,9 @@ const DCLM_APP = (function () {
               ${item.last_error ? `<div class="small text-danger mt-1">Sync issue: ${escapeHTML(item.last_error)}</div>` : ""}
             </div>
             <div class="d-flex gap-2">
-              <button type="button" class="btn btn-sm btn-outline-primary rounded-pill px-3" data-edit-count-id="${escapeHTML(item.client_id)}">Edit</button>
-              <button type="button" class="btn btn-sm btn-primary rounded-pill px-3" data-sync-store="counts_queue" data-sync-id="${escapeHTML(item.client_id)}">Sync</button>
-              <button type="button" class="btn btn-sm btn-outline-danger rounded-pill px-3" data-discard-store="counts_queue" data-discard-id="${escapeHTML(item.client_id)}">Discard</button>
+              <button type="button" class="btn btn-sm btn-outline-primary rounded-pill px-3" data-edit-count-id="${escapeAttribute(item.client_id)}">Edit</button>
+              <button type="button" class="btn btn-sm btn-primary rounded-pill px-3" data-sync-store="counts_queue" data-sync-id="${escapeAttribute(item.client_id)}">Sync</button>
+              <button type="button" class="btn btn-sm btn-outline-danger rounded-pill px-3" data-discard-store="counts_queue" data-discard-id="${escapeAttribute(item.client_id)}">Discard</button>
             </div>
           </div>
         `;
@@ -1640,7 +1841,7 @@ const DCLM_APP = (function () {
               <div class="small text-muted">${escapeHTML(item.fund_type)} via ${escapeHTML(item.payment_method)}</div>
               ${item.last_error ? `<div class="small text-danger mt-1">Sync issue: ${escapeHTML(item.last_error)}</div>` : ""}
             </div>
-          <div class="d-flex gap-2"><button type="button" class="btn btn-sm btn-primary rounded-pill px-3" data-sync-store="offerings_queue" data-sync-id="${escapeHTML(item.client_id)}">Sync</button><button type="button" class="btn btn-sm btn-outline-danger rounded-pill px-3" data-discard-store="offerings_queue" data-discard-id="${escapeHTML(item.client_id)}">Discard</button></div>
+          <div class="d-flex gap-2"><button type="button" class="btn btn-sm btn-primary rounded-pill px-3" data-sync-store="offerings_queue" data-sync-id="${escapeAttribute(item.client_id)}">Sync</button><button type="button" class="btn btn-sm btn-outline-danger rounded-pill px-3" data-discard-store="offerings_queue" data-discard-id="${escapeAttribute(item.client_id)}">Discard</button></div>
           </div>
         `;
       });
@@ -1654,7 +1855,7 @@ const DCLM_APP = (function () {
               ${Array.isArray(item.present_workers) ? `<div class="small text-muted mt-1">${escapeHTML(item.present_workers.slice(0, 5).map((worker) => worker.worker_name || worker.name || "Church Worker").join(", "))}${item.present_workers.length > 5 ? ` + ${item.present_workers.length - 5} more` : ""}</div>` : ""}
               ${item.last_error ? `<div class="small text-danger mt-1">Sync issue: ${escapeHTML(item.last_error)}</div>` : ""}
             </div>
-            <div class="d-flex gap-2"><button class="btn btn-sm btn-primary rounded-pill px-3" data-sync-store="attendance_queue" data-sync-id="${escapeHTML(item.client_id)}">Sync</button><button class="btn btn-sm btn-outline-danger rounded-pill px-3" data-discard-store="attendance_queue" data-discard-id="${escapeHTML(item.client_id)}">Discard</button></div>
+            <div class="d-flex gap-2"><button class="btn btn-sm btn-primary rounded-pill px-3" data-sync-store="attendance_queue" data-sync-id="${escapeAttribute(item.client_id)}">Sync</button><button class="btn btn-sm btn-outline-danger rounded-pill px-3" data-discard-store="attendance_queue" data-discard-id="${escapeAttribute(item.client_id)}">Discard</button></div>
           </div>
         `;
       });
@@ -1667,7 +1868,7 @@ const DCLM_APP = (function () {
               <div class="small text-muted">${escapeHTML(item.phone)} • ${escapeHTML(item.details?.salvation_type || "Follow-up")}</div>
               ${item.last_error ? `<div class="small text-danger mt-1">Sync issue: ${escapeHTML(item.last_error)}</div>` : ""}
             </div>
-          <div class="d-flex gap-2"><button type="button" class="btn btn-sm btn-primary rounded-pill px-3" data-sync-store="registration_queue" data-sync-id="${escapeHTML(item.client_id)}">Sync</button><button type="button" class="btn btn-sm btn-outline-danger rounded-pill px-3" data-discard-store="registration_queue" data-discard-id="${escapeHTML(item.client_id)}">Discard</button></div>
+          <div class="d-flex gap-2"><button type="button" class="btn btn-sm btn-primary rounded-pill px-3" data-sync-store="registration_queue" data-sync-id="${escapeAttribute(item.client_id)}">Sync</button><button type="button" class="btn btn-sm btn-outline-danger rounded-pill px-3" data-discard-store="registration_queue" data-discard-id="${escapeAttribute(item.client_id)}">Discard</button></div>
           </div>
         `;
       });
@@ -1680,7 +1881,7 @@ const DCLM_APP = (function () {
               <div class="small text-muted">${escapeHTML(item.phone)} · ${escapeHTML(item.unit)}</div>
               ${item.last_error ? `<div class="small text-danger mt-1">Sync issue: ${escapeHTML(item.last_error)}</div>` : ""}
             </div>
-            <div class="d-flex gap-2"><button type="button" class="btn btn-sm btn-primary rounded-pill px-3" data-sync-store="worker_candidates_queue" data-sync-id="${escapeHTML(item.client_id)}">Sync</button><button type="button" class="btn btn-sm btn-outline-danger rounded-pill px-3" data-discard-store="worker_candidates_queue" data-discard-id="${escapeHTML(item.client_id)}">Discard</button></div>
+            <div class="d-flex gap-2"><button type="button" class="btn btn-sm btn-primary rounded-pill px-3" data-sync-store="worker_candidates_queue" data-sync-id="${escapeAttribute(item.client_id)}">Sync</button><button type="button" class="btn btn-sm btn-outline-danger rounded-pill px-3" data-discard-store="worker_candidates_queue" data-discard-id="${escapeAttribute(item.client_id)}">Discard</button></div>
           </div>
         `;
       });
@@ -1695,9 +1896,14 @@ const DCLM_APP = (function () {
           const detail = store === "fellowship_attendance_queue"
             ? `${Number(item.men) + Number(item.women) + Number(item.youths) + Number(item.children)} people · ${item.date}`
             : store === "fellowship_offerings_queue" ? `₦${Number(item.amount).toLocaleString()} · ${item.date}` : escapeHTML(item.name);
-          html += `<div class="dclm-queue-item type-attendance"><div><div class="fw-bold text-dark small"><i class="bi bi-house-heart text-primary me-1"></i>${label}</div><div class="small text-muted">${escapeHTML(item.fellowship_name || "House Fellowship")} | ${detail}</div>${item.last_error ? `<div class="small text-danger mt-1">Sync issue: ${escapeHTML(item.last_error)}</div>` : ""}</div><div class="d-flex gap-2"><button type="button" class="btn btn-sm btn-primary rounded-pill px-3" data-sync-store="${store}" data-sync-id="${escapeHTML(item.client_id)}">Sync</button><button type="button" class="btn btn-sm btn-outline-danger rounded-pill px-3" data-discard-store="${store}" data-discard-id="${escapeHTML(item.client_id)}">Discard</button></div></div>`;
+          html += `<div class="dclm-queue-item type-attendance"><div><div class="fw-bold text-dark small"><i class="bi bi-house-heart text-primary me-1"></i>${label}</div><div class="small text-muted">${escapeHTML(item.fellowship_name || "House Fellowship")} | ${detail}</div>${item.last_error ? `<div class="small text-danger mt-1">Sync issue: ${escapeHTML(item.last_error)}</div>` : ""}</div><div class="d-flex gap-2"><button type="button" class="btn btn-sm btn-primary rounded-pill px-3" data-sync-store="${store}" data-sync-id="${escapeAttribute(item.client_id)}">Sync</button><button type="button" class="btn btn-sm btn-outline-danger rounded-pill px-3" data-discard-store="${store}" data-discard-id="${escapeAttribute(item.client_id)}">Discard</button></div></div>`;
         });
       }
+
+      submissionEdits.forEach((item) => {
+        const refused = item.status === "rejected";
+        html += `<div class="dclm-queue-item type-attendance"><div><div class="fw-bold text-dark small"><i class="bi bi-pencil-square text-primary me-1"></i> Offline edit · ${escapeHTML(item.label || item.resource.replaceAll("_", " "))}</div><div class="small text-muted">Saved ${new Date(item.queued_at || Date.now()).toLocaleString()} · The server checks the edit window when syncing.</div>${item.last_error ? `<div class="small ${refused ? "text-danger" : "text-muted"} mt-1">${refused ? "Edit refused: " : "Sync note: "}${escapeHTML(item.last_error)}</div>` : ""}</div><div class="d-flex gap-2">${!refused ? `<button type="button" class="btn btn-sm btn-primary rounded-pill px-3" data-sync-store="submission_edits_queue" data-sync-id="${escapeAttribute(item.client_id)}">Sync</button>` : ""}<button type="button" class="btn btn-sm btn-outline-danger rounded-pill px-3" data-discard-store="submission_edits_queue" data-discard-id="${escapeAttribute(item.client_id)}">Discard</button></div></div>`;
+      });
 
       listEl.innerHTML = html;
     }
@@ -1725,8 +1931,246 @@ const DCLM_APP = (function () {
     }
   }
 
+  async function renderSubmittedCountEdits() {
+    const target = qs("#submitted-count-edits");
+    if (!target) return;
+    try {
+      const response = await window.DCLM_AUTH.apiFetch("/api/counts/editable");
+      const data = await response.json();
+      if (!response.ok || !data.ok) throw new Error(data.error || "Submitted counts are unavailable.");
+      if (!data.items?.length) {
+        target.innerHTML = '<p class="small text-muted mb-0">No submitted counts are currently open for editing.</p>';
+        return;
+      }
+      const fields = ["adult_male", "adult_female", "youth_male", "youth_female", "boys", "girls"];
+      const labels = { adult_male: "Adult men", adult_female: "Adult women", youth_male: "Youth men", youth_female: "Youth women", boys: "Boys", girls: "Girls" };
+      target.innerHTML = data.items.map((item) => `
+        <form class="border rounded-3 p-3 mb-3 submitted-count-edit" data-submitted-count-form="${escapeAttribute(item.id)}">
+          <div class="d-flex justify-content-between gap-2 flex-wrap mb-2">
+            <strong>${escapeHTML(item.program_type)} · ${escapeHTML(item.date)}${item.section_label ? ` · ${escapeHTML(item.section_label)}` : ""}</strong>
+            <span class="badge ${item.status === "returned" ? "bg-warning-subtle text-warning-emphasis" : "bg-primary-subtle text-primary-emphasis"}">${escapeHTML(item.status)}</span>
+          </div>
+          <p class="small text-muted mb-2">${Number(item.hours_remaining || 0)} hours left · ${Number(item.edits_remaining || 0)} edits left · current total ${Number(item.total || 0).toLocaleString()}</p>
+          ${item.locked ? `<p class="small text-secondary" role="status">${escapeHTML(item.locked_message || "This count is locked.")}</p>` : ""}
+          ${item.count_mode === "section" ? `<p class="small text-muted mb-2">Service ${escapeHTML(item.service_id || "main")} · ${item.auto_closed ? "Auto-closed, not confirmed by an usher" : item.count_group_state === "conflict" ? "Conflict: not included in totals" : `Running group total ${Number(item.group_total || 0).toLocaleString()}`} · sections: ${escapeHTML((item.reported_sections || []).join(", ") || "none yet")}</p>` : ""}
+          ${item.return_reason ? `<p class="small text-warning-emphasis">Pastor's note: ${escapeHTML(item.return_reason)}</p>` : ""}
+          <input type="hidden" name="revision" value="${Number(item.revision || 0)}">
+          <div class="row g-2">${fields.map((field) => `<div class="col-6 col-md-4"><label class="form-label small" for="edit_${escapeAttribute(item.id)}_${field}">${labels[field]}</label><input class="form-control form-control-sm" id="edit_${escapeAttribute(item.id)}_${field}" name="${field}" type="number" min="0" max="999999" step="1" value="${Number(item.categories?.[field] || 0)}" ${item.locked ? "disabled" : "required"}></div>`).join("")}</div>
+          <div class="d-flex gap-2 flex-wrap mt-3"><button class="btn btn-sm btn-primary" type="submit" ${item.locked ? "disabled" : ""}>Save correction</button>${item.can_close_group && item.count_group_state === "conflict" && item.count_mode === "section" ? `<button class="btn btn-sm btn-outline-secondary" type="button" data-resolve-count-group="${escapeAttribute(item.id)}" data-resolve-action="relabel_both">Rename this section</button>` : ""}${item.can_close_group && item.count_mode === "section" && item.count_group_state === "open" ? `<button class="btn btn-sm btn-outline-secondary" type="button" data-close-count-group="${escapeAttribute(item.id)}">Close count</button>` : ""}</div>
+        </form>`).join("");
+    } catch (error) {
+      target.innerHTML = `<p class="small text-danger mb-0">Could not load submitted counts: ${escapeHTML(error.message || "Request failed")}</p>`;
+    }
+  }
+
+  async function renderSubmittedOfferingEdits() {
+    const target = qs("#submitted-offering-edits");
+    if (!target) return;
+    try {
+      const response = await window.DCLM_AUTH.apiFetch("/api/offerings/editable");
+      const data = await response.json();
+      if (!response.ok || !data.ok) throw new Error(data.error || "Submitted offerings are unavailable.");
+      if (!data.items?.length) {
+        target.innerHTML = '<p class="small text-muted mb-0">No submitted offerings are available for editing.</p>';
+        return;
+      }
+      target.innerHTML = data.items.map((item) => `
+        <form class="border rounded-3 p-3 mb-3 submitted-offering-edit" data-submitted-offering-form="${escapeAttribute(item.id)}">
+          <div class="d-flex justify-content-between gap-2 flex-wrap mb-2"><strong>${escapeHTML(item.fund_type || "Offering")} · ${escapeHTML(item.date || "")}</strong><span class="badge ${item.status === "returned" ? "bg-warning-subtle text-warning-emphasis" : "bg-primary-subtle text-primary-emphasis"}">${escapeHTML(item.status)}</span></div>
+          <p class="small text-muted mb-2">${Number(item.hours_remaining || 0)} hours left · ${Number(item.edits_remaining || 0)} edits left · ₦${Number(item.amount || 0).toLocaleString()}</p>
+          ${item.locked ? `<p class="small text-secondary" role="status">${escapeHTML(item.locked_message || "This offering is locked.")}</p>` : ""}
+          <input type="hidden" name="revision" value="${Number(item.revision || 0)}">
+          <div class="row g-2">
+            <div class="col-12 col-md-4"><label class="form-label small">Amount (NGN)</label><input class="form-control form-control-sm" name="amount" type="number" min="0.01" max="9999999999.99" step="0.01" value="${Number(item.amount || 0)}" ${item.locked ? "disabled" : "required"}></div>
+            <div class="col-12 col-md-4"><label class="form-label small">Payment method</label><input class="form-control form-control-sm" name="payment_method" maxlength="80" value="${escapeHTML(item.payment_method || "")}" ${item.locked ? "disabled" : "required"}></div>
+            <div class="col-12 col-md-4"><label class="form-label small">Fund type</label><input class="form-control form-control-sm" name="fund_type" maxlength="80" value="${escapeHTML(item.fund_type || "")}" ${item.locked ? "disabled" : "required"}></div>
+            <div class="col-12"><label class="form-label small">Note</label><input class="form-control form-control-sm" name="note" maxlength="4000" value="${escapeHTML(item.note || "")}" ${item.locked ? "disabled" : ""}></div>
+          </div>
+          <button class="btn btn-sm btn-primary mt-3" type="submit" ${item.locked ? "disabled" : ""}>Save offering edit</button>
+        </form>`).join("");
+    } catch (error) {
+      target.innerHTML = `<p class="small text-danger" role="alert">Submitted offerings could not load: ${escapeHTML(error.message || "connection error")}</p>`;
+    }
+  }
+
+  async function renderEditableRecordType(resource, targetId, title) {
+    const target = qs(`#${targetId}`);
+    if (!target) return;
+    try {
+      const response = await window.DCLM_AUTH.apiFetch(`/api/submissions/${resource}/editable`);
+      const data = await response.json();
+      if (!response.ok || !data.ok) throw new Error(data.error || `Could not load ${title}.`);
+      const rows = data.items || [];
+      if (!rows.length) { target.innerHTML = `<p class="small text-muted mb-0">No submitted ${title} are available for editing.</p>`; return; }
+      target.innerHTML = rows.map((item) => {
+        const values = item.values || {};
+        const workerChecks = resource === "worker_attendance" ? (item.expected_worker_ids || []).map((entry) => {
+          const id = typeof entry === "string" ? entry : entry.worker_id;
+          const name = typeof entry === "string" ? id : (entry.worker_name || entry.name || id);
+          const present = (item.present_workers || []).some((worker) => String(worker.worker_id) === String(id));
+          return `<label class="form-check d-flex gap-2 align-items-center"><input class="form-check-input mt-0" type="checkbox" name="worker_id" value="${escapeHTML(id)}" ${present ? "checked" : ""} ${item.locked ? "disabled" : ""}><span class="small">${escapeHTML(name)}</span></label>`;
+        }).join("") : "";
+        const fields = resource === "worker_attendance" ? `${workerChecks}<label class="form-label small mt-2">Note</label><input class="form-control form-control-sm" name="note" value="${escapeHTML(item.note || "")}" ${item.locked ? "disabled" : ""}>`
+          : resource === "fellowship_attendance" ? `<div class="row g-2">${["men", "women", "youths", "children"].map((key) => `<div class="col-6"><label class="form-label small">${key[0].toUpperCase() + key.slice(1)}</label><input class="form-control form-control-sm" name="${key}" type="number" min="0" max="999999" step="1" value="${Number(values[key] || 0)}" ${item.locked ? "disabled" : ""}></div>`).join("")}</div><label class="form-label small mt-2">Topic</label><input class="form-control form-control-sm" name="topic" value="${escapeHTML(values.topic || "")}" ${item.locked ? "disabled" : ""}>`
+            : `<label class="form-label small">Amount (NGN)</label><input class="form-control form-control-sm" name="amount" type="number" min="0.01" step="0.01" value="${Number(values.amount || 0)}" ${item.locked ? "disabled" : ""}>`;
+        return `<form class="border rounded-3 p-3 mb-3" data-editable-record="${escapeAttribute(resource)}" data-record-id="${escapeAttribute(item.id)}"><div class="d-flex justify-content-between"><strong class="small">${escapeHTML(item.date || "Submitted record")}</strong><span class="small text-muted">${Number(item.hours_remaining || 0)}h · ${Number(item.edits_remaining || 0)} edits left</span></div><input type="hidden" name="revision" value="${Number(item.revision || 0)}">${item.locked ? `<p class="small text-secondary mb-2" role="status">${escapeHTML(item.locked_message || "This submission is locked.")}</p>` : ""}<div class="mt-2">${fields}</div><button class="btn btn-sm btn-primary mt-3" type="submit" ${item.locked ? "disabled" : ""}>Save edit</button></form>`;
+      }).join("");
+    } catch (error) { target.innerHTML = `<p class="small text-danger" role="alert">${escapeHTML(error.message || `${title} could not load.`)}</p>`; }
+  }
+
+  async function renderAllEditableRecords() {
+    await Promise.all([
+      renderEditableRecordType("worker_attendance", "submitted-worker-attendance-edits", "worker attendance"),
+      renderEditableRecordType("fellowship_attendance", "submitted-fellowship-attendance-edits", "fellowship attendance"),
+      renderEditableRecordType("fellowship_offering", "submitted-fellowship-offering-edits", "fellowship offerings"),
+    ]);
+  }
+
+  async function submitOrQueueSubmittedEdit({ resource, submissionId, payload, url, retryKey, label }) {
+    const queued = await DCLM_DB.getAllFromQueue("submission_edits_queue");
+    if (queued.some((item) => item.resource === resource && item.submission_id === submissionId)) {
+      throw new Error("A previous offline edit is waiting to sync. Sync or discard it before making another edit.");
+    }
+    const queueEdit = async (message) => {
+      await DCLM_DB.addToQueue("submission_edits_queue", {
+        client_id: payload.edit_id, resource, submission_id: submissionId, payload, retry_key: retryKey,
+        label, last_error: message || "Saved offline. The server will check the edit window when this syncs.",
+      });
+      showToast("Edit saved on this device. The server will check the edit window when it syncs.", "warning");
+      await renderQueuesView();
+      return { queued: true };
+    };
+    if (!navigator.onLine) return queueEdit();
+    let response;
+    try {
+      response = await window.DCLM_AUTH.apiFetch(url, {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
+      });
+    } catch (error) {
+      return queueEdit(error.message || "Connection lost. The edit is saved for sync.");
+    }
+    const data = await response.json();
+    if (!response.ok || !data.ok) {
+      if ([502, 503, 504].includes(response.status)) return queueEdit(data.error || "The records service is unavailable. The edit is saved for retry.");
+      throw new Error(data.error || "The edit could not be saved.");
+    }
+    localStorage.removeItem(retryKey);
+    return { saved: true };
+  }
+
   function initQueuesBindings() {
     const listEl = qs("#pending-queue-list");
+    ["submitted-worker-attendance-edits", "submitted-fellowship-attendance-edits", "submitted-fellowship-offering-edits"].forEach((targetId) => qs(`#${targetId}`)?.addEventListener("submit", async (event) => {
+      const form = event.target.closest("[data-editable-record]");
+      if (!form) return;
+      event.preventDefault();
+      const button = form.querySelector('button[type="submit"]');
+      await runButtonAction(button, "Saving…", async () => {
+        const resource = form.dataset.editableRecord;
+        const values = resource === "worker_attendance"
+          ? { present_workers: [...form.querySelectorAll('input[name="worker_id"]:checked')].map((input) => input.value), note: form.elements.namedItem("note")?.value.trim() || null }
+          : resource === "fellowship_attendance"
+            ? { men: Number(form.elements.namedItem("men").value), women: Number(form.elements.namedItem("women").value), youths: Number(form.elements.namedItem("youths").value), children: Number(form.elements.namedItem("children").value), topic: form.elements.namedItem("topic").value.trim() || null }
+            : { amount: Number(form.elements.namedItem("amount").value) };
+        const id = form.dataset.recordId;
+        const retryKey = `dclm_${resource}_edit_${id}`;
+        let retry = null;
+        try { retry = JSON.parse(localStorage.getItem(retryKey) || "null"); } catch (_) {}
+        if (!retry) { retry = { edit_id: crypto.randomUUID(), base_revision: Number(form.elements.namedItem("revision").value) }; localStorage.setItem(retryKey, JSON.stringify(retry)); }
+        const result = await submitOrQueueSubmittedEdit({ resource, submissionId: id, payload: { ...retry, values },
+          url: `/api/submissions/${encodeURIComponent(resource)}/${encodeURIComponent(id)}/edit`, retryKey, label: resource.replaceAll("_", " ") });
+        if (result.saved) showToast("Submission edit saved.", "success");
+        await renderAllEditableRecords();
+      });
+    }));
+    qs("#submitted-offering-edits")?.addEventListener("submit", async (event) => {
+      const form = event.target.closest("[data-submitted-offering-form]");
+      if (!form) return;
+      event.preventDefault();
+      const button = form.querySelector('button[type="submit"]');
+      await runButtonAction(button, "Saving…", async () => {
+        const id = form.dataset.submittedOfferingForm;
+        const values = {
+          amount: Number(form.elements.namedItem("amount").value),
+          payment_method: form.elements.namedItem("payment_method").value.trim(),
+          fund_type: form.elements.namedItem("fund_type").value.trim(),
+          note: form.elements.namedItem("note").value.trim() || null,
+        };
+        const retryKey = `dclm_offering_edit_${id}`;
+        let retry = null;
+        try { retry = JSON.parse(localStorage.getItem(retryKey) || "null"); } catch (_) {}
+        if (!retry) {
+          retry = { edit_id: crypto.randomUUID(), base_revision: Number(form.elements.namedItem("revision").value) };
+          localStorage.setItem(retryKey, JSON.stringify(retry));
+        }
+        const result = await submitOrQueueSubmittedEdit({ resource: "offering", submissionId: id, payload: { ...retry, values },
+          url: `/api/offerings/${encodeURIComponent(id)}/edit`, retryKey, label: "offering" });
+        if (result.saved) showToast("Offering edit saved.", "success");
+        await renderSubmittedOfferingEdits();
+      });
+    });
+    qs("#submitted-count-edits")?.addEventListener("submit", async (event) => {
+      const form = event.target.closest("[data-submitted-count-form]");
+      if (!form) return;
+      event.preventDefault();
+      const button = form.querySelector('button[type="submit"]');
+      await runButtonAction(button, "Saving…", async () => {
+        const id = form.dataset.submittedCountForm;
+        const keys = ["adult_male", "adult_female", "youth_male", "youth_female", "boys", "girls"];
+        const values = Object.fromEntries(keys.map((key) => [key, Number(form.elements.namedItem(key).value)]));
+        if (Object.values(values).some((value) => !Number.isInteger(value) || value < 0 || value > 999999)) throw new Error("Use whole number counts from 0 to 999999.");
+        const retryKey = `dclm_count_edit_${id}`;
+        let retry = null;
+        try { retry = JSON.parse(localStorage.getItem(retryKey) || "null"); } catch (_) {}
+        if (!retry) {
+          retry = { edit_id: crypto.randomUUID(), base_revision: Number(form.elements.namedItem("revision").value) };
+          localStorage.setItem(retryKey, JSON.stringify(retry));
+        }
+        const result = await submitOrQueueSubmittedEdit({ resource: "count", submissionId: id, payload: { ...retry, values },
+          url: `/api/counts/${encodeURIComponent(id)}/edit`, retryKey, label: "population count" });
+        if (result.saved) showToast("Correction saved and sent for approval.", "success");
+        await renderSubmittedCountEdits();
+        await renderQueuesView();
+      });
+    });
+    qs("#submitted-count-edits")?.addEventListener("click", async (event) => {
+      const button = event.target.closest("[data-close-count-group]");
+      const resolveButton = event.target.closest("[data-resolve-count-group]");
+      if (button) {
+        await runButtonAction(button, "Closing…", async () => {
+          const endpoint = `/api/counts/groups/${encodeURIComponent(button.dataset.closeCountGroup)}/close`;
+          let response = await window.DCLM_AUTH.apiFetch(endpoint, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({}) });
+          let data = await response.json();
+          if (response.ok && data.confirmation_required) {
+            const missing = (data.missing_suggested_labels || []).join(", ");
+            if (!window.confirm(`Last time this location also had ${missing}. Close anyway?`)) return;
+            response = await window.DCLM_AUTH.apiFetch(endpoint, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ confirm_missing_suggestions: true }) });
+            data = await response.json();
+          }
+          if (!response.ok || !data.ok) throw new Error(typeof data.error === "string" ? data.error : data.error?.message || "The count group could not be closed.");
+          showToast("Count group closed.", "success");
+          await renderSubmittedCountEdits();
+        });
+      } else if (resolveButton) {
+        await runButtonAction(resolveButton, "Resolving…", async () => {
+          const action = resolveButton.dataset.resolveAction || "keep_one";
+          const payload = action === "replace"
+            ? { action, replace_count_id: resolveButton.dataset.resolveCountGroup }
+            : action === "relabel_both"
+              ? { action, replace_count_id: resolveButton.dataset.resolveCountGroup, new_label: window.prompt("Enter a distinct section name for this part:")?.trim() }
+              : { action, keep_count_id: resolveButton.dataset.resolveCountGroup };
+          if (action === "relabel_both" && !payload.new_label) return;
+          const response = await window.DCLM_AUTH.apiFetch(`/api/counts/groups/${encodeURIComponent(resolveButton.dataset.resolveCountGroup)}/resolve`, {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+          });
+          const data = await response.json();
+          if (!response.ok || !data.ok) throw new Error(data.error || "The count conflict could not be resolved.");
+          showToast(action === "relabel_both" ? "Section renamed; both parts remain separate." : "Count conflict resolved; original rows remain in the audit history.", "success");
+          await renderSubmittedCountEdits();
+        });
+      }
+    });
     let editingCount = null;
     listEl?.addEventListener("click", (event) => {
       const target = event.target instanceof Element ? event.target : event.target?.parentElement;

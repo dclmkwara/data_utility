@@ -5,7 +5,7 @@
 
 const DCLM_DB = (function () {
   const DB_NAME = "dclm_field_utility_db";
-  const DB_VERSION = 8;
+  const DB_VERSION = 9;
 
   const STORES = {
     active_setup: "key",             // Active Ecclesiastical Identity
@@ -18,6 +18,7 @@ const DCLM_DB = (function () {
     fellowship_members_queue: "client_id",
     fellowship_attendance_queue: "client_id",
     fellowship_offerings_queue: "client_id",
+    submission_edits_queue: "client_id", // Offline edits; the server remains authoritative for edit windows.
     recent_submissions: "client_id",  // Confirmed synced history
     auth_state: "key",                 // Last authorized profile only; never tokens
     count_draft: "key",                // In-progress demographic count per account
@@ -228,7 +229,7 @@ const DCLM_DB = (function () {
       return performTx(storeName, "readonly", (store) => {
         return reqToPromise(store.getAll()).then((items) => items
           .filter((item) => item.owner_id === ownerId)
-          .map((item) => ["counts_queue", "offerings_queue", "attendance_queue", "registration_queue", "worker_candidates_queue", "fellowship_members_queue", "fellowship_attendance_queue", "fellowship_offerings_queue"].includes(storeName)
+          .map((item) => ["counts_queue", "offerings_queue", "attendance_queue", "registration_queue", "worker_candidates_queue", "fellowship_members_queue", "fellowship_attendance_queue", "fellowship_offerings_queue", "submission_edits_queue"].includes(storeName)
             ? {
               ...item,
               status: item.status === "syncing" ? "pending" : (item.status || "pending"),

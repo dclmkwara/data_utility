@@ -420,6 +420,147 @@ def setup_api_proxy_routes(app: Any) -> None:
             set_session_cookie(response, refreshed_cookie)
         return response
 
+    @app.get("/api/counts/editable")
+    async def list_editable_counts(request: Request):
+        session = _session(request)
+        if not session:
+            return JSONResponse({"ok": False, "error": "Sign in to view your submitted counts."}, status_code=401)
+        try:
+            rows = await backend_client.list_my_editable_counts(session["access_token"])
+            return JSONResponse({"ok": True, "items": rows})
+        except Exception as exc:
+            return _response_error(exc)
+
+    @app.get("/api/offerings/editable")
+    async def list_editable_offerings(request: Request):
+        session = _session(request)
+        if not session:
+            return JSONResponse({"ok": False, "error": "Sign in to view your submitted offerings."}, status_code=401)
+        try:
+            rows = await backend_client.list_my_editable_offerings(session["access_token"])
+            return JSONResponse({"ok": True, "items": rows})
+        except Exception as exc:
+            return _response_error(exc)
+
+    @app.get("/api/offerings/preflight")
+    async def offering_preflight(request: Request):
+        session = _session(request)
+        if not session:
+            return JSONResponse({"ok": False, "error": "Sign in before checking this offering."}, status_code=401)
+        try:
+            params = request.query_params
+            item = await backend_client.check_offering_preflight(
+                location_id=params.get("location_id", ""), service_date=params.get("service_date", ""),
+                fund_type=params.get("fund_type", "offering"), program_domain=params.get("program_domain", ""),
+                program_type=params.get("program_type", ""), event_id=params.get("event_id") or None,
+                access_token=session["access_token"],
+            )
+            return JSONResponse({"ok": True, **item})
+        except Exception as exc:
+            return _response_error(exc)
+
+    @app.post("/api/offerings/{offering_id}/edit")
+    async def edit_submitted_offering(request: Request, offering_id: str):
+        session = _session(request)
+        if not session:
+            return JSONResponse({"ok": False, "error": "Sign in to edit your submitted offering."}, status_code=401)
+        try:
+            UUID(offering_id)
+            payload = await request.json()
+            item = await backend_client.edit_offering_submission(offering_id, payload, session["access_token"])
+            return JSONResponse({"ok": True, "item": item})
+        except Exception as exc:
+            return _response_error(exc)
+
+    @app.post("/api/counts/{count_id}/edit")
+    async def edit_submitted_count(request: Request, count_id: str):
+        session = _session(request)
+        if not session:
+            return JSONResponse({"ok": False, "error": "Sign in to edit your submitted count."}, status_code=401)
+        try:
+            UUID(count_id)
+            payload = await request.json()
+            result = await backend_client.edit_count_submission(count_id, payload, session["access_token"])
+            return JSONResponse({"ok": True, "item": result})
+        except Exception as exc:
+            return _response_error(exc)
+
+    @app.get("/api/submissions/{resource}/editable")
+    async def list_editable_submissions(request: Request, resource: str):
+        session = _session(request)
+        if not session:
+            return JSONResponse({"ok": False, "error": "Sign in to view submitted records."}, status_code=401)
+        try:
+            rows = await backend_client.list_my_editable_records(resource, session["access_token"])
+            return JSONResponse({"ok": True, "items": rows})
+        except Exception as exc:
+            return _response_error(exc)
+
+    @app.post("/api/submissions/{resource}/{submission_id}/edit")
+    async def edit_submitted_record(request: Request, resource: str, submission_id: str):
+        session = _session(request)
+        if not session:
+            return JSONResponse({"ok": False, "error": "Sign in to edit this record."}, status_code=401)
+        try:
+            UUID(submission_id)
+            payload = await request.json()
+            result = await backend_client.edit_submission(resource, submission_id, payload, session["access_token"])
+            return JSONResponse({"ok": True, "item": result})
+        except Exception as exc:
+            return _response_error(exc)
+
+    @app.post("/api/counts/groups/{count_id}/close")
+    async def close_submitted_count_group(request: Request, count_id: str):
+        session = _session(request)
+        if not session:
+            return JSONResponse({"ok": False, "error": "Sign in to close this count group."}, status_code=401)
+        try:
+            UUID(count_id)
+            payload = await request.json()
+            result = await backend_client.close_count_group(count_id, payload, session["access_token"])
+            return JSONResponse({"ok": True, **result})
+        except Exception as exc:
+            return _response_error(exc)
+
+    @app.get("/api/counts/suggestions/{location_id}")
+    async def list_count_section_suggestions(request: Request, location_id: str, program_domain: str = ""):
+        session = _session(request)
+        if not session:
+            return JSONResponse({"ok": False, "error": "Sign in to view section suggestions."}, status_code=401)
+        try:
+            UUID(location_id)
+            rows = await backend_client.list_count_section_suggestions(location_id, session["access_token"], program_domain)
+            return JSONResponse({"ok": True, "items": rows})
+        except Exception as exc:
+            return _response_error(exc)
+
+    @app.get("/api/counts/services/{location_id}")
+    async def list_prior_count_services(request: Request, location_id: str, program_type: str = "", event_id: str = ""):
+        session = _session(request)
+        if not session:
+            return JSONResponse({"ok": False, "error": "Sign in to view service options."}, status_code=401)
+        try:
+            UUID(location_id)
+            service_date = request.query_params.get("date", "")
+            date.fromisoformat(service_date[:10])
+            services = await backend_client.list_prior_count_services(location_id, service_date[:10], program_type, event_id or None, session["access_token"])
+            return JSONResponse({"ok": True, "services": services})
+        except Exception as exc:
+            return _response_error(exc)
+
+    @app.put("/api/counts/suggestions/{location_id}")
+    async def update_count_section_suggestions(request: Request, location_id: str):
+        session = _session(request)
+        if not session:
+            return JSONResponse({"ok": False, "error": "Sign in to manage section suggestions."}, status_code=401)
+        try:
+            UUID(location_id)
+            payload = await request.json()
+            result = await backend_client.update_count_section_suggestions(location_id, payload, session["access_token"])
+            return JSONResponse({"ok": True, **result})
+        except Exception as exc:
+            return _response_error(exc)
+
     @app.get("/api/validate-location")
     def validate_location(level: str = "", location_id: str = ""):
         """Syntax-only helper; authorization and existence are backend responsibilities."""

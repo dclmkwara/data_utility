@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+from urllib.parse import quote
 from typing import Any
 import httpx
 
@@ -259,6 +260,105 @@ class BackendClient:
             "ok": False,
             "error": f"Unable to reach sync endpoint ({last_error}). Batches preserved locally.",
         }
+
+    async def list_my_editable_counts(self, access_token: str) -> list[dict[str, Any]]:
+        resp = await self._request("GET", "/api/v1/counts/mine/editable", headers={"Authorization": f"Bearer {access_token}"})
+        self._raise_for_error(resp)
+        data = resp.json()
+        if not isinstance(data, list):
+            raise BackendAPIError(502, "Church_server returned invalid editable count data")
+        return data
+
+    async def list_my_editable_offerings(self, access_token: str) -> list[dict[str, Any]]:
+        resp = await self._request("GET", "/api/v1/offerings/mine/editable", headers={"Authorization": f"Bearer {access_token}"})
+        self._raise_for_error(resp)
+        data = resp.json()
+        if not isinstance(data, list):
+            raise BackendAPIError(502, "Church_server returned invalid editable offering data")
+        return data
+
+    async def check_offering_preflight(self, *, location_id: str, service_date: str, fund_type: str,
+                                       program_domain: str, program_type: str, event_id: str | None,
+                                       access_token: str) -> dict[str, Any]:
+        params = {"location_id": location_id, "service_date": service_date, "fund_type": fund_type,
+                  "program_domain": program_domain, "program_type": program_type}
+        if event_id:
+            params["event_id"] = event_id
+        resp = await self._request("GET", "/api/v1/offerings/preflight", params=params,
+                                   headers={"Authorization": f"Bearer {access_token}"})
+        self._raise_for_error(resp)
+        data = resp.json()
+        if not isinstance(data, dict) or not isinstance(data.get("already_recorded"), bool):
+            raise BackendAPIError(502, "Church_server returned invalid offering preflight data")
+        return data
+
+    async def edit_offering_submission(self, offering_id: str, payload: dict[str, Any], access_token: str) -> dict[str, Any]:
+        resp = await self._request("POST", f"/api/v1/offerings/{offering_id}/edit", json=payload, headers={"Authorization": f"Bearer {access_token}"})
+        self._raise_for_error(resp)
+        return resp.json()
+
+    async def edit_count_submission(self, count_id: str, payload: dict[str, Any], access_token: str) -> dict[str, Any]:
+        resp = await self._request("POST", f"/api/v1/counts/{count_id}/edit", json=payload, headers={"Authorization": f"Bearer {access_token}"})
+        self._raise_for_error(resp)
+        return resp.json()
+
+    async def list_my_editable_records(self, resource: str, access_token: str) -> list[dict[str, Any]]:
+        paths = {
+            "worker_attendance": "/api/v1/attendance/submissions/mine/editable",
+            "fellowship_attendance": "/api/v1/fellowships/attendance/mine/editable",
+            "fellowship_offering": "/api/v1/fellowships/offerings/mine/editable",
+        }
+        if resource not in paths:
+            raise ValueError("Unknown editable submission type")
+        resp = await self._request("GET", paths[resource], headers={"Authorization": f"Bearer {access_token}"})
+        self._raise_for_error(resp)
+        data = resp.json()
+        if not isinstance(data, list):
+            raise BackendAPIError(502, "Church_server returned invalid editable submission data")
+        return data
+
+    async def edit_submission(self, resource: str, submission_id: str, payload: dict[str, Any], access_token: str) -> dict[str, Any]:
+        paths = {
+            "worker_attendance": f"/api/v1/attendance/submissions/{submission_id}/edit",
+            "fellowship_attendance": f"/api/v1/fellowships/attendance/{submission_id}/edit",
+            "fellowship_offering": f"/api/v1/fellowships/offerings/{submission_id}/edit",
+        }
+        if resource not in paths:
+            raise ValueError("Unknown editable submission type")
+        resp = await self._request("POST", paths[resource], json=payload, headers={"Authorization": f"Bearer {access_token}"})
+        self._raise_for_error(resp)
+        return resp.json()
+
+    async def close_count_group(self, count_id: str, payload: dict[str, Any], access_token: str) -> dict[str, Any]:
+        resp = await self._request("POST", f"/api/v1/counts/groups/{count_id}/close", json=payload, headers={"Authorization": f"Bearer {access_token}"})
+        self._raise_for_error(resp)
+        return resp.json()
+
+    async def list_count_section_suggestions(self, location_id: str, access_token: str, program_domain: str = "") -> list[dict[str, Any]]:
+        suffix = f"?program_domain={quote(program_domain)}" if program_domain else ""
+        resp = await self._request("GET", f"/api/v1/counts/suggestions/{location_id}{suffix}", headers={"Authorization": f"Bearer {access_token}"})
+        self._raise_for_error(resp)
+        data = resp.json()
+        if not isinstance(data, list):
+            raise BackendAPIError(502, "Church_server returned invalid count section suggestions")
+        return data
+
+    async def list_prior_count_services(self, location_id: str, occurrence_date: str, program_type: str, event_id: str | None, access_token: str) -> list[str]:
+        params = {"program_type": program_type}
+        if event_id:
+            params["event_id"] = event_id
+        resp = await self._request("GET", f"/api/v1/counts/services/{location_id}/{occurrence_date}", params=params, headers={"Authorization": f"Bearer {access_token}"})
+        self._raise_for_error(resp)
+        data = resp.json()
+        services = data.get("services") if isinstance(data, dict) else None
+        if not isinstance(services, list):
+            raise BackendAPIError(502, "Church_server returned invalid service options")
+        return [str(value) for value in services]
+
+    async def update_count_section_suggestions(self, location_id: str, payload: list[dict[str, Any]], access_token: str) -> dict[str, Any]:
+        resp = await self._request("PUT", f"/api/v1/counts/suggestions/{location_id}", json=payload, headers={"Authorization": f"Bearer {access_token}"})
+        self._raise_for_error(resp)
+        return resp.json()
 
 
 backend_client = BackendClient()

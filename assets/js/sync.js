@@ -133,9 +133,12 @@ const DCLM_SYNC = (function () {
       program_level: item.program_level || "Local",
       program_domain: item.program_domain, program_type: item.program_type,
       assignment_id: item.assignment_id || null,
+      total: Number(item.total || 0),
       adult_male: Number(item.adult_male || 0), adult_female: Number(item.adult_female || 0),
       youth_male: Number(item.youth_male || 0), youth_female: Number(item.youth_female || 0),
       boys: Number(item.boys || 0), girls: Number(item.girls || 0), note: item.note || null,
+      count_mode: item.count_mode || "single", section_label: item.section_label || null,
+      service_id: item.service_id || "main",
       submission_channel: "field_utility",
     };
     if (group.field === "offerings") return {
@@ -187,12 +190,23 @@ const DCLM_SYNC = (function () {
       DCLM_APP.showToast("Device is offline. Saved records remain on this device.", "warning");
       return { ok: false, offline: true };
     }
+    const editSync = await syncQueuedSubmissionEdits();
     await DCLM_DB.normalizeLegacyAttendanceQueue();
     const groups = await Promise.all(QUEUES.map(async ([store, field, label]) => ({
       store, field, label, items: await DCLM_DB.getAllFromQueue(store),
     })));
     const entries = groups.flatMap((group) => group.items.map((item) => ({ group, item })));
     if (!entries.length) {
+      if (editSync.rejected || editSync.failed) {
+        if (typeof DCLM_APP.renderQueuesView === "function") await DCLM_APP.renderQueuesView();
+        DCLM_APP.showToast(`${editSync.synced} queued edit(s) synced; ${editSync.rejected + editSync.failed} need attention.`, "warning");
+        return { ok: false, synced: editSync.synced, failed: editSync.rejected + editSync.failed };
+      }
+      if (editSync.synced) {
+        if (typeof DCLM_APP.renderQueuesView === "function") await DCLM_APP.renderQueuesView();
+        DCLM_APP.showToast(`${editSync.synced} queued edit(s) synced.`, "success");
+        return { ok: true, synced: editSync.synced };
+      }
       DCLM_APP.showToast("No pending records to sync.", "info");
       return { ok: true, synced: 0 };
     }
@@ -228,7 +242,7 @@ const DCLM_SYNC = (function () {
       return { ok: false, synced: 0, failed };
     }
 
-    let synced = 0;
+    let synced = editSync.synced;
     let networkError = null;
     const confirmedAttendanceContexts = new Set();
     for (let offset = 0; offset < eligible.length; offset += 500) {
@@ -308,12 +322,67 @@ const DCLM_SYNC = (function () {
       DCLM_APP.showToast(`${synced} confirmed; remaining records are still saved. Sync stopped: ${networkError}`, "warning");
       return { ok: false, synced, failed, error: networkError };
     }
-    if (failed) DCLM_APP.showToast(`${synced} confirmed; ${failed} remain queued for correction.`, "warning");
+    if (failed || editSync.rejected || editSync.failed) DCLM_APP.showToast(`${synced} confirmed; ${failed + editSync.rejected + editSync.failed} remain queued or need attention.`, "warning");
     else DCLM_APP.showToast(`${synced} record(s) confirmed by the church records service.`, "success");
-    return { ok: failed === 0, synced, failed };
+    return { ok: failed === 0 && editSync.rejected === 0 && editSync.failed === 0, synced,
+      failed: failed + editSync.rejected + editSync.failed };
+  }
+
+  async function syncQueuedSubmissionEdits() {
+    const items = await DCLM_DB.getAllFromQueue("submission_edits_queue");
+    let synced = 0, rejected = 0, failed = 0;
+    for (const item of items) {
+      if (item.status === "rejected") { rejected += 1; continue; }
+      try {
+        const editPath = item.resource === "count"
+          ? `/api/counts/${encodeURIComponent(item.submission_id)}/edit`
+          : item.resource === "offering"
+            ? `/api/offerings/${encodeURIComponent(item.submission_id)}/edit`
+            : `/api/submissions/${encodeURIComponent(item.resource)}/${encodeURIComponent(item.submission_id)}/edit`;
+        const response = await window.DCLM_AUTH.apiFetch(editPath, {
+          method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(item.payload),
+        });
+        const data = await response.json();
+        if (!response.ok || !data.ok) {
+          const message = data.error || "The queued edit was refused by the records service.";
+          if (response.status >= 400 && response.status < 500) {
+            if (item.retry_key) localStorage.removeItem(item.retry_key);
+            await DCLM_DB.addToQueue("submission_edits_queue", { ...item, status: "rejected", last_error: message });
+            rejected += 1;
+          } else {
+            await DCLM_DB.addToQueue("submission_edits_queue", { ...item, status: "pending", last_error: message });
+            failed += 1;
+          }
+          continue;
+        }
+        if (item.retry_key) localStorage.removeItem(item.retry_key);
+        await DCLM_DB.removeFromQueue("submission_edits_queue", item.client_id);
+        synced += 1;
+      } catch (error) {
+        await DCLM_DB.addToQueue("submission_edits_queue", {
+          ...item, status: "pending", last_error: error.message || "Could not contact the records service.",
+        });
+        failed += 1;
+      }
+    }
+    return { synced, rejected, failed };
   }
 
   async function syncQueueItem(store, clientId) {
+    if (store === "submission_edits_queue") {
+      if (!navigator.onLine) {
+        DCLM_APP.showToast("Device is offline. This edit remains saved on this device.", "warning");
+        return { ok: false, offline: true };
+      }
+      const item = (await DCLM_DB.getAllFromQueue(store)).find((row) => String(row.client_id) === String(clientId));
+      if (!item || item.status === "rejected") return { ok: false, rejected: true };
+      const result = await syncQueuedSubmissionEdits();
+      if (typeof DCLM_APP.renderQueuesView === "function") await DCLM_APP.renderQueuesView();
+      if (result.synced) DCLM_APP.showToast("Queued edit synced successfully.", "success");
+      else if (result.rejected) DCLM_APP.showToast("The edit was refused. Check its message in Sync Queues.", "warning");
+      else DCLM_APP.showToast("The edit remains queued; the records service could not confirm it.", "warning");
+      return { ok: result.failed === 0 && result.rejected === 0, ...result };
+    }
     if (store === "attendance_queue") {
       await DCLM_DB.normalizeLegacyAttendanceQueue();
     }
@@ -334,5 +403,7 @@ const DCLM_SYNC = (function () {
     return result;
   }
 
-  return { syncAllQueues, syncQueueItem, submitOrQueue, submitManyOrQueue };
+  const api = { syncAllQueues, syncQueueItem, submitOrQueue, submitManyOrQueue };
+  window.DCLM_SYNC = api;
+  return api;
 })();

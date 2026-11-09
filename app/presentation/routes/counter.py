@@ -49,7 +49,7 @@ def setup_counter_routes(app: Any) -> None:
         total_card = Card(
             Div(
                 Span("0", id="counter-grand-total", cls="dclm-total-number d-block", role="status", aria_live="polite", aria_atomic="true"),
-                Span("Total Population Count", cls="dclm-total-label"),
+                Span("TOTAL POPULATION COUNT", cls="dclm-total-label"),
                 Div(
                     Button(
                         I(cls="bi bi-pencil-square me-1"), "Edit Numbers",
@@ -128,6 +128,32 @@ def setup_counter_routes(app: Any) -> None:
             cls="dclm-card mb-3"
         )
 
+        count_mode_row = Div(
+                Label(
+                    Input(type="checkbox", name="count_mode", value="section", id="count-mode", cls="form-check-input me-2"),
+                    "I'm counting only part of the congregation",
+                    cls="form-check-label fw-semibold",
+                ),
+                Div(
+                    Label("Section name", for_="count-section-label", cls="form-label small fw-semibold"),
+                    Input(type="text", name="section_label", id="count-section-label", maxlength="120", placeholder="Section name", list="count-section-suggestions", cls="form-control"),
+                    Div(id="count-section-suggestion-chips", cls="d-flex flex-wrap gap-2 mt-2"),
+                    id="count-section-label-wrap", hidden=True,
+                ),
+                Div(id="count-section-suggestions-manager", cls="small text-muted"),
+                cls="my-3",
+        )
+
+        service_picker = Div(
+            Label("Service session", for_="count-service-id", cls="form-label small fw-semibold mb-1"),
+            Select(
+                Option("Main service", value="main", selected=True),
+                id="count-service-id", cls="form-select form-select-sm",
+                aria_label="Service session",
+            ),
+            id="count-service-picker", hidden=True, cls="mb-3",
+        )
+
         # Queue Final Batch Submit
         bottom_actions = Div(
             Button(
@@ -148,8 +174,11 @@ def setup_counter_routes(app: Any) -> None:
                 Div(
                     total_card,
                     counter_tiles,
+                    count_mode_row,
+                    service_picker,
                     offering_card,
                     bottom_actions,
+                    Div(id="count-group-summary", hidden=True, role="status", aria_live="polite", cls="small text-muted mt-2"),
                     id="counter-content-wrap"
                 ),
                 edit_count_modal(),
