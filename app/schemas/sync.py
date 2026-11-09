@@ -28,6 +28,12 @@ class FellowshipAttendanceItem(BaseModel):
     women: int = Field(default=0, ge=0)
     youths: int = Field(default=0, ge=0)
     children: int = Field(default=0, ge=0)
+    adult_male: int = Field(default=0, ge=0)
+    adult_female: int = Field(default=0, ge=0)
+    youth_male: int = Field(default=0, ge=0)
+    youth_female: int = Field(default=0, ge=0)
+    boys: int = Field(default=0, ge=0)
+    girls: int = Field(default=0, ge=0)
     topic: str | None = None
     note: str | None = None
 

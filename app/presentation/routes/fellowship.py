@@ -22,7 +22,11 @@ def setup_fellowship_routes(app: Any) -> None:
                 Col(Div(Label(label, for_=f"fellowship_{key}", cls="form-label small"),
                          Input(id=f"fellowship_{key}", type="number", min="0", step="1", value="0", inputmode="numeric",
                                cls="form-control", required=True)), cols=6, cls="mb-2")
-                for key, label in (("men", "Men"), ("women", "Women"), ("youths", "Youths"), ("children", "Children"))
+                for key, label in (
+                    ("adult_male", "Adult Male"), ("adult_female", "Adult Female"),
+                    ("youth_male", "Youth Male"), ("youth_female", "Youth Female"),
+                    ("boys", "Boys"), ("girls", "Girls"),
+                )
             ], cls="g-2"),
             Label("Topic (optional)", for_="fellowship_topic", cls="form-label small fw-semibold mt-2"),
             Input(id="fellowship_topic", maxlength="200", cls="form-control mb-3"),

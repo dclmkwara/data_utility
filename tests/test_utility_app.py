@@ -57,6 +57,15 @@ def test_core_routes_render():
         assert "DCLM" in response.text
 
 
+def test_fellowship_attendance_form_has_six_explicit_population_categories():
+    response = client.get("/fellowship")
+    assert response.status_code == 200
+    for label in ("Adult Male", "Adult Female", "Youth Male", "Youth Female", "Boys", "Girls"):
+        assert label in response.text
+    for legacy_label in (">Men<", ">Women<", ">Youths<", ">Children<"):
+        assert legacy_label not in response.text
+
+
 def test_information_sheet_is_backend_driven_and_proxy_requires_session():
     page = client.get("/information")
     assert page.status_code == 200
@@ -482,6 +491,25 @@ def test_fellowship_sync_requires_fellowship_id_not_program_event(monkeypatch):
     })
     assert response.status_code == 200
     assert "event_id" not in push.await_args.args[0]["fellowship_attendance"][0]
+
+
+def test_fellowship_sync_forwards_six_category_values(monkeypatch):
+    test_client = _authenticated_client(monkeypatch)
+    push = AsyncMock(return_value={"ok": True, "fellowship_attendance": {"details": []}})
+    monkeypatch.setattr(backend_client, "push_sync_batch", push)
+    categories = {"adult_male": 1, "adult_female": 2, "youth_male": 3,
+                  "youth_female": 4, "boys": 5, "girls": 6}
+    response = test_client.post("/api/sync", json={
+        "fellowship_attendance": [{
+            "client_id": "44444444-4444-4444-8444-444444444444",
+            "fellowship_id": "55555555-5555-4555-8555-555555555555",
+            "date": "2026-11-08T00:00:00Z",
+            **categories,
+        }],
+    })
+    assert response.status_code == 200
+    forwarded = push.await_args.args[0]["fellowship_attendance"][0]
+    assert {key: forwarded[key] for key in categories} == categories
 
 
 def test_fellowship_sync_rejects_invalid_uuid_and_bad_meeting_date(monkeypatch):
