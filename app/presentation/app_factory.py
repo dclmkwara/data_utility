@@ -62,8 +62,8 @@ def create_app() -> FastHTML:
         Script(src="/assets/js/db.js?v=13", defer=True),
         Script(src="/assets/js/auth.js?v=4", defer=True),
         Script(src="/assets/js/haptics.js?v=5", defer=True),
-        Script(src="/assets/js/sync.js?v=16", defer=True),
-        Script(src="/assets/js/app.js?v=36", defer=True),
+        Script(src="/assets/js/sync.js?v=17", defer=True),
+        Script(src="/assets/js/app.js?v=37", defer=True),
         Script(sw_registration),
     ]
 

@@ -55,13 +55,16 @@ class WorkerAttendanceSubmissionItem(BaseModel):
     client_id: str
     location_id: str
     event_id: str | None = None
+    assignment_id: str | None = None
     date: str
     church_type: str
     program_domain: str | None = None
+    program_level: str | None = None
     program_type: str
     expected_workers_count: int = Field(ge=0)
     present_workers: list[AttendancePresentWorkerItem] = Field(min_length=1, max_length=5000)
     submitted_by_worker_id: str | None = None
+    note: str | None = None
 
 
 class WorkerCandidateItem(BaseModel):

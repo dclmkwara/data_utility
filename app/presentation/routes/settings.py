@@ -37,7 +37,7 @@ def setup_settings_routes(app: Any) -> None:
                     Option("Queue first; submit when I choose Sync", value="queue_first"),
                     id="submission-mode", cls="form-select mb-2",
                 ),
-                Small("Instant mode sends records directly while online and saves them on this device if submission fails. Queue-first mode keeps them here until you submit from Sync Queues.",
+                Small("Instant mode sends directly while online and queues only when the connection is unavailable. Server validation errors stay on screen for correction. Queue-first mode keeps records here until you submit from Sync Queues.",
                       id="submission-mode-help", cls="text-muted d-block mb-3"),
                 Div(
                     Div(

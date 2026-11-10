@@ -25,7 +25,11 @@ const DCLM_SYNC = (function () {
       body: JSON.stringify(payload),
     });
     const result = await response.json();
-    if (!response.ok || result.ok === false) throw new Error(result.error || `Server rejected submission (${response.status}).`);
+    if (!response.ok || result.ok === false) {
+      const error = new Error(result.error || `Server rejected submission (${response.status}).`);
+      error.status = response.status;
+      throw error;
+    }
     return result[group.field]?.details || [];
   }
 
@@ -71,6 +75,7 @@ const DCLM_SYNC = (function () {
       const resultById = new Map(details.map((detail) => [String(detail.client_id), detail]));
       let submitted = 0;
       let queued = 0;
+      const failures = [];
       for (const item of items) {
         const detail = resultById.get(String(item.client_id));
         if (detail && ["synced", "duplicate"].includes(detail.status)) {
@@ -79,8 +84,13 @@ const DCLM_SYNC = (function () {
           submitted += 1;
         } else {
           const error = detail?.error || "The records service did not confirm this submission.";
-          await DCLM_DB.addToQueue(store, { ...item, last_error: error });
-          queued += 1;
+          if (forceImmediate || !navigator.onLine) {
+            await DCLM_DB.addToQueue(store, { ...item, last_error: error });
+            queued += 1;
+          } else {
+            failed += 1;
+            failures.push(error);
+          }
         }
       }
       if (group.field === "worker_attendance_submissions" && submitted > 0 && queued === 0) {
@@ -88,10 +98,17 @@ const DCLM_SYNC = (function () {
       }
       await DCLM_APP.refreshHomeQueueSummary();
       await DCLM_APP.renderQueuesView();
-      if (queued) DCLM_APP.showToast(`${submitted} submitted; ${queued} remain saved on this device for retry or correction.`, "warning");
+      if (failed) DCLM_APP.showToast(`${submitted} submitted; ${failed} rejected: ${failures.slice(0, 2).join("; ")}. Correct the details and submit again.`, "danger");
+      else if (queued) DCLM_APP.showToast(`${submitted} submitted; ${queued} remain saved on this device for retry or correction.`, "warning");
       else DCLM_APP.showToast(`${submitted} ${group.label.toLowerCase()} record(s) submitted successfully.`, "success");
-      return { ok: queued === 0, submitted, queued };
+      return { ok: queued === 0 && failed === 0, submitted, queued, failed };
     } catch (error) {
+      const retryableTransportFailure = !Number.isInteger(error?.status)
+        || [502, 503, 504].includes(error.status);
+      if (!retryableTransportFailure) {
+        DCLM_APP.showToast(`The records service rejected the submission: ${error.message || "Check the details and try again."}`, "danger");
+        return { ok: false, submitted: 0, queued: 0, error };
+      }
       for (const item of items) await DCLM_DB.addToQueue(store, { ...item, last_error: error.message || "Submission was not confirmed." });
       await DCLM_APP.refreshHomeQueueSummary();
       await DCLM_APP.renderQueuesView();

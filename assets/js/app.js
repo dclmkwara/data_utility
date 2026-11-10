@@ -16,6 +16,7 @@ const DCLM_APP = (function () {
   let hapticsFailureNotified = false;
   let confirmResolver = null;
   let deferredInstallPrompt = null;
+  let editableRecordsRefreshTimer = null;
 
   window.addEventListener("beforeinstallprompt", (event) => {
     event.preventDefault();
@@ -1449,7 +1450,7 @@ const DCLM_APP = (function () {
       recorded_at: new Date().toISOString(),
     };
     const submission = await runButtonAction(submitButton, "Submitting...", () =>
-      DCLM_SYNC.submitOrQueue("attendance_queue", attendanceCapture, { skipEditWarning: true, forceImmediate: true }));
+      DCLM_SYNC.submitOrQueue("attendance_queue", attendanceCapture, { skipEditWarning: true }));
     if (!submission) return;
     if (!submission.submitted && !submission.queued) return;
     const queuedWorkers = await DCLM_DB.getAttendancePendingWorkerIds(contextKey);
@@ -1783,6 +1784,7 @@ const DCLM_APP = (function () {
     const badgeEl = qs("#pending-queue-badge");
 
     if (!listEl) return;
+    await DCLM_DB.pruneRecentSubmissions();
     await renderSubmittedCountEdits();
     await renderSubmittedOfferingEdits();
     await renderAllEditableRecords();
@@ -1929,6 +1931,10 @@ const DCLM_APP = (function () {
         `).join("");
       }
     }
+    if (editableRecordsRefreshTimer) window.clearTimeout(editableRecordsRefreshTimer);
+    editableRecordsRefreshTimer = window.setTimeout(() => {
+      if (qs("#pending-queue-list")) renderQueuesView();
+    }, 60 * 60 * 1000);
   }
 
   async function renderSubmittedCountEdits() {
@@ -1938,13 +1944,14 @@ const DCLM_APP = (function () {
       const response = await window.DCLM_AUTH.apiFetch("/api/counts/editable");
       const data = await response.json();
       if (!response.ok || !data.ok) throw new Error(data.error || "Submitted counts are unavailable.");
-      if (!data.items?.length) {
+      const editableItems = (data.items || []).filter(isEditableSubmission);
+      if (!editableItems.length) {
         target.innerHTML = '<p class="small text-muted mb-0">No submitted counts are currently open for editing.</p>';
         return;
       }
       const fields = ["adult_male", "adult_female", "youth_male", "youth_female", "boys", "girls"];
       const labels = { adult_male: "Adult men", adult_female: "Adult women", youth_male: "Youth men", youth_female: "Youth women", boys: "Boys", girls: "Girls" };
-      target.innerHTML = data.items.map((item) => `
+      target.innerHTML = editableItems.map((item) => `
         <form class="border rounded-3 p-3 mb-3 submitted-count-edit" data-submitted-count-form="${escapeAttribute(item.id)}">
           <div class="d-flex justify-content-between gap-2 flex-wrap mb-2">
             <strong>${escapeHTML(item.program_type)} · ${escapeHTML(item.date)}${item.section_label ? ` · ${escapeHTML(item.section_label)}` : ""}</strong>
@@ -1970,11 +1977,12 @@ const DCLM_APP = (function () {
       const response = await window.DCLM_AUTH.apiFetch("/api/offerings/editable");
       const data = await response.json();
       if (!response.ok || !data.ok) throw new Error(data.error || "Submitted offerings are unavailable.");
-      if (!data.items?.length) {
+      const editableItems = (data.items || []).filter(isEditableSubmission);
+      if (!editableItems.length) {
         target.innerHTML = '<p class="small text-muted mb-0">No submitted offerings are available for editing.</p>';
         return;
       }
-      target.innerHTML = data.items.map((item) => `
+      target.innerHTML = editableItems.map((item) => `
         <form class="border rounded-3 p-3 mb-3 submitted-offering-edit" data-submitted-offering-form="${escapeAttribute(item.id)}">
           <div class="d-flex justify-content-between gap-2 flex-wrap mb-2"><strong>${escapeHTML(item.fund_type || "Offering")} · ${escapeHTML(item.date || "")}</strong><span class="badge ${item.status === "returned" ? "bg-warning-subtle text-warning-emphasis" : "bg-primary-subtle text-primary-emphasis"}">${escapeHTML(item.status)}</span></div>
           <p class="small text-muted mb-2">${Number(item.hours_remaining || 0)} hours left · ${Number(item.edits_remaining || 0)} edits left · ₦${Number(item.amount || 0).toLocaleString()}</p>
@@ -2000,7 +2008,7 @@ const DCLM_APP = (function () {
       const response = await window.DCLM_AUTH.apiFetch(`/api/submissions/${resource}/editable`);
       const data = await response.json();
       if (!response.ok || !data.ok) throw new Error(data.error || `Could not load ${title}.`);
-      const rows = data.items || [];
+      const rows = (data.items || []).filter(isEditableSubmission);
       if (!rows.length) { target.innerHTML = `<p class="small text-muted mb-0">No submitted ${title} are available for editing.</p>`; return; }
       target.innerHTML = rows.map((item) => {
         const values = item.values || {};
@@ -2024,6 +2032,10 @@ const DCLM_APP = (function () {
       renderEditableRecordType("fellowship_attendance", "submitted-fellowship-attendance-edits", "fellowship attendance"),
       renderEditableRecordType("fellowship_offering", "submitted-fellowship-offering-edits", "fellowship offerings"),
     ]);
+  }
+
+  function isEditableSubmission(item) {
+    return !item.locked && Number(item.hours_remaining) > 0 && Number(item.edits_remaining) > 0;
   }
 
   async function submitOrQueueSubmittedEdit({ resource, submissionId, payload, url, retryKey, label }) {

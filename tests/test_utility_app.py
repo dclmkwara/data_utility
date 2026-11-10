@@ -170,6 +170,9 @@ def test_offline_submission_edits_are_queued_and_server_window_is_checked_on_syn
     assert 'data-submitted-count-form="${escapeAttribute(item.id)}"' in app_js
     assert 'data-sync-id="${escapeAttribute(item.client_id)}"' in app_js
     assert 'service_id: qs("#count-service-id")?.value || "main"' in app_js
+    assert "function isEditableSubmission(item)" in app_js
+    assert "editableRecordsRefreshTimer" in app_js
+    assert "25 * 60 * 60 * 1000" in db_js
     queue = client.get("/queues")
     assert queue.status_code == 200
     assert "Submitted counts you can still edit" in queue.text
@@ -183,6 +186,17 @@ def test_offline_submission_edits_are_queued_and_server_window_is_checked_on_syn
     assert 'data-resolve-action="replace"' not in app_js
     assert "confirmation_required" in app_js
     assert "Close anyway?" in app_js
+
+
+def test_attendance_submission_obeys_queue_setting_and_online_validation_is_not_queued():
+    app_js = Path("assets/js/app.js").read_text(encoding="utf-8")
+    sync_js = Path("assets/js/sync.js").read_text(encoding="utf-8")
+    settings = Path("app/presentation/routes/settings.py").read_text(encoding="utf-8")
+    assert 'submitOrQueue("attendance_queue", attendanceCapture, { skipEditWarning: true })' in app_js
+    assert "error.status = response.status" in sync_js
+    assert "if (!retryableTransportFailure)" in sync_js
+    assert "if (forceImmediate || !navigator.onLine)" in sync_js
+    assert "queues only when the connection is unavailable" in settings
 def test_submitted_count_edit_proxy_is_authenticated_and_scoped_to_backend_actor(monkeypatch):
     assert client.get("/api/counts/editable").status_code == 401
     test_client = _authenticated_client(monkeypatch)
@@ -359,6 +373,73 @@ def test_sync_forwards_valid_record_with_authenticated_session(monkeypatch):
     assert response.status_code == 200
     assert response.json()["counts"]["details"][0]["status"] == "synced"
     push.assert_awaited_once()
+
+
+def test_worker_attendance_submission_forwards_complete_backend_metadata(monkeypatch):
+    test_client = _authenticated_client(monkeypatch)
+    client_id = "22222222-2222-4222-8222-222222222222"
+    worker_id = "44444444-4444-4444-8444-444444444444"
+    location_id = "11111111-1111-4111-8111-111111111111"
+    assignment_id = "55555555-5555-4555-8555-555555555555"
+    expected = {"ok": True, "worker_attendance_submissions": {
+        "synced": 1, "duplicates": 0, "errors": 0,
+        "details": [{"client_id": client_id, "status": "synced"}],
+    }}
+    push = AsyncMock(return_value=expected)
+    monkeypatch.setattr(backend_client, "push_sync_batch", push)
+    response = test_client.post("/api/sync", json={
+        "worker_attendance_submissions": [{
+            "client_id": client_id, "location_id": location_id,
+            "assignment_id": assignment_id, "date": "2026-11-10T00:00:00Z",
+            "church_type": "DCLM", "program_level": "Local",
+            "program_domain": "Weekly", "program_type": "Workers Meeting",
+            "expected_workers_count": 1,
+            "present_workers": [{"worker_id": worker_id, "worker_name": "Synthetic Worker"}],
+            "submitted_by_worker_id": worker_id,
+        }],
+    })
+    assert response.status_code == 200, response.text
+    forwarded = push.await_args.args[0]["worker_attendance_submissions"][0]
+    assert forwarded["assignment_id"] == assignment_id
+    assert forwarded["program_level"] == "Local"
+    assert forwarded["program_domain"] == "Weekly"
+    assert forwarded["expected_workers_count"] == 1
+    assert forwarded["present_workers"] == [{"worker_id": worker_id, "worker_name": "Synthetic Worker"}]
+
+
+def test_worker_attendance_submission_schema_matches_sync_metadata():
+    from app.schemas.sync import WorkerAttendanceSubmissionItem
+
+    item = WorkerAttendanceSubmissionItem(
+        client_id="22222222-2222-4222-8222-222222222222",
+        location_id="11111111-1111-4111-8111-111111111111",
+        assignment_id="55555555-5555-4555-8555-555555555555",
+        date="2026-11-10T00:00:00Z", church_type="DCLM", program_level="Local",
+        program_domain="Weekly", program_type="Workers Meeting", expected_workers_count=1,
+        present_workers=[{"worker_id": "44444444-4444-4444-8444-444444444444", "worker_name": "Synthetic Worker"}],
+    )
+    assert item.assignment_id
+    assert item.program_level == "Local"
+
+
+def test_worker_attendance_rejects_malformed_assignment_parameter_before_forwarding(monkeypatch):
+    test_client = _authenticated_client(monkeypatch)
+    push = AsyncMock()
+    monkeypatch.setattr(backend_client, "push_sync_batch", push)
+    response = test_client.post("/api/sync", json={
+        "worker_attendance_submissions": [{
+            "client_id": "22222222-2222-4222-8222-222222222222",
+            "location_id": "11111111-1111-4111-8111-111111111111",
+            "assignment_id": "not-a-uuid", "date": "2026-11-10T00:00:00Z",
+            "church_type": "DCLM", "program_level": "Local",
+            "program_domain": "Weekly", "program_type": "Workers Meeting",
+            "expected_workers_count": 1,
+            "present_workers": [{"worker_id": "44444444-4444-4444-8444-444444444444", "worker_name": "Synthetic Worker"}],
+        }],
+    })
+    assert response.status_code == 422
+    assert "invalid UUID" in response.json()["error"]
+    push.assert_not_awaited()
 
 
 def test_worker_candidate_sync_forwards_only_candidate_fields(monkeypatch):

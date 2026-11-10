@@ -343,6 +343,8 @@ def setup_api_proxy_routes(app: Any) -> None:
                         UUID(str(item["location_id"]))
                         if item.get("event_id"):
                             UUID(str(item["event_id"]))
+                        if item.get("assignment_id"):
+                            UUID(str(item["assignment_id"]))
                     elif resource_name != "worker_candidates":
                         UUID(str(item["fellowship_id"]))
                 except (ValueError, TypeError, AttributeError):

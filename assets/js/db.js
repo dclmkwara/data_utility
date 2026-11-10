@@ -252,13 +252,26 @@ const DCLM_DB = (function () {
 
     async pruneRecentSubmissions(maxRecords = 50) {
       const recent = await this.getAllFromQueue("recent_submissions");
-      recent.sort((a, b) => new Date(b.synced_at) - new Date(a.synced_at));
-      for (const oldItem of recent.slice(maxRecords)) {
+      const expiresBefore = Date.now() - 25 * 60 * 60 * 1000;
+      const expired = recent.filter((item) => !Number.isFinite(new Date(item.synced_at).getTime())
+        || new Date(item.synced_at).getTime() < expiresBefore);
+      for (const oldItem of expired) await this.removeFromQueue("recent_submissions", oldItem.client_id);
+      const current = recent.filter((item) => !expired.includes(item));
+      current.sort((a, b) => new Date(b.synced_at) - new Date(a.synced_at));
+      for (const oldItem of current.slice(maxRecords)) {
         await this.removeFromQueue("recent_submissions", oldItem.client_id);
+      }
+      const confirmed = await this.getAllFromQueue("attendance_confirmed");
+      for (const item of confirmed) {
+        const confirmedAt = new Date(item.confirmed_at).getTime();
+        if (!Number.isFinite(confirmedAt) || confirmedAt < expiresBefore) {
+          await this.removeFromQueue("attendance_confirmed", item.cache_key);
+        }
       }
     },
 
     async getAttendanceSubmittedWorkerIds(eventId) {
+      await this.pruneRecentSubmissions();
       const [recent, confirmed] = await Promise.all([
         this.getAllFromQueue("recent_submissions"),
         this.getAllFromQueue("attendance_confirmed"),
