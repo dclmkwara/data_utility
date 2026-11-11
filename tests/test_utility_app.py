@@ -197,6 +197,19 @@ def test_attendance_submission_obeys_queue_setting_and_online_validation_is_not_
     assert "if (!retryableTransportFailure)" in sync_js
     assert "if (forceImmediate || !navigator.onLine)" in sync_js
     assert "queues only when the connection is unavailable" in settings
+
+
+def test_server_rejected_sync_item_is_not_misclassified_as_offline_queue_item():
+    sync_js = Path("assets/js/sync.js").read_text(encoding="utf-8")
+    submit_flow = sync_js.split("async function submitManyOrQueue", 1)[1].split("function payloadFor", 1)[0]
+
+    # A batch can return HTTP 200 while an individual record has status=error.
+    # The result loop must count that rejection and show it, not throw a
+    # ReferenceError that the outer catch misclassifies as network loss.
+    assert "let failed = 0;" in submit_flow
+    assert 'const error = detail?.error || "The records service did not confirm this submission.";' in submit_flow
+    assert "if (failed) DCLM_APP.showToast" in submit_flow
+    assert "const retryableTransportFailure" in submit_flow
 def test_submitted_count_edit_proxy_is_authenticated_and_scoped_to_backend_actor(monkeypatch):
     assert client.get("/api/counts/editable").status_code == 401
     test_client = _authenticated_client(monkeypatch)

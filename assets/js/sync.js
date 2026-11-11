@@ -75,6 +75,7 @@ const DCLM_SYNC = (function () {
       const resultById = new Map(details.map((detail) => [String(detail.client_id), detail]));
       let submitted = 0;
       let queued = 0;
+      let failed = 0;
       const failures = [];
       for (const item of items) {
         const detail = resultById.get(String(item.client_id));
